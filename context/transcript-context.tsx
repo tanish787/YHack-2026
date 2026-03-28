@@ -119,7 +119,7 @@ export function TranscriptProvider({ children }: { children: React.ReactNode }) 
   );
 
   const topContentWords = useMemo(
-    () => getTopContentWords(fullTranscript, { limit: 30 }),
+    () => getTopContentWords(fullTranscript, { limit: 10 }),
     [fullTranscript],
   );
 
