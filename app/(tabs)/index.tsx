@@ -1,18 +1,20 @@
 import * as Haptics from 'expo-haptics';
 import { useCallback, useState } from 'react';
 import {
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    View,
-    useWindowDimensions,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  TextInput,
+  View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useTranscript } from '@/context/transcript-context';
 import {
     CORRECTION_FOCUS_OPTIONS,
     type CorrectionFocusId,
@@ -24,10 +26,12 @@ export default function CoachScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const { width } = useWindowDimensions();
   const isWide = width >= 520;
+  const { segments, appendSegment } = useTranscript();
 
   const tint = useThemeColor({}, 'tint');
   const muted = useThemeColor({}, 'icon');
   const bg = useThemeColor({}, 'background');
+  const textColor = useThemeColor({}, 'text');
 
   const surface = colorScheme === 'dark' ? '#1c2124' : '#f0f4f8';
   const surface2 = colorScheme === 'dark' ? '#252b30' : '#e2e8f0';
@@ -37,18 +41,30 @@ export default function CoachScreen() {
   const [listening, setListening] = useState(false);
   const [focusId, setFocusId] = useState<CorrectionFocusId>('fillers');
   const [mistakeCount, setMistakeCount] = useState(0);
+  /** Holds live or pasted speech until the session ends; replace with STT callbacks later. */
+  const [listeningCapture, setListeningCapture] = useState('');
 
-  const onListeningChange = useCallback((next: boolean) => {
-    if (Platform.OS !== 'web') {
-      void Haptics.impactAsync(
-        next ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light,
-      );
-    }
-    if (next) {
-      setMistakeCount(0);
-    }
-    setListening(next);
-  }, []);
+  const onListeningChange = useCallback(
+    async (next: boolean) => {
+      if (Platform.OS !== 'web') {
+        void Haptics.impactAsync(
+          next ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light,
+        );
+      }
+      if (next) {
+        setMistakeCount(0);
+        setListeningCapture('');
+      } else {
+        const chunk = listeningCapture.trim();
+        if (chunk) {
+          await appendSegment(chunk, 'listening');
+        }
+        setListeningCapture('');
+      }
+      setListening(next);
+    },
+    [listeningCapture, appendSegment],
+  );
 
   const selectFocus = useCallback(
     (id: CorrectionFocusId) => {
@@ -104,13 +120,36 @@ export default function CoachScreen() {
           </View>
           <Switch
             value={listening}
-            onValueChange={onListeningChange}
+            onValueChange={(v) => void onListeningChange(v)}
             trackColor={{ false: surface2, true: accentSoft }}
             thumbColor={listening ? accent : '#f4f4f5'}
             ios_backgroundColor={surface2}
             accessibilityLabel="Toggle active listening"
           />
         </View>
+        {listening ? (
+          <TextInput
+            style={[
+              styles.captureInput,
+              {
+                color: textColor,
+                backgroundColor: surface2,
+                borderColor: colorScheme === 'dark' ? '#404854' : '#e5e7eb',
+              },
+            ]}
+            placeholder="Transcript from the mic will appear here. Paste or type for now, then turn listening off to save."
+            placeholderTextColor={muted}
+            multiline
+            value={listeningCapture}
+            onChangeText={setListeningCapture}
+            textAlignVertical="top"
+          />
+        ) : null}
+        <ThemedText style={[styles.transcriptHint, { color: muted }]}>
+          {segments.length > 0
+            ? `${segments.length} segment${segments.length === 1 ? '' : 's'} saved · view full transcript on Analytics`
+            : 'Saved segments show on the Analytics tab'}
+        </ThemedText>
       </View>
 
       <ThemedText type="subtitle" style={styles.sectionTitle}>
@@ -253,6 +292,20 @@ const styles = StyleSheet.create({
   listeningHint: {
     fontSize: 14,
     marginTop: 4,
+  },
+  captureInput: {
+    marginTop: 14,
+    minHeight: 100,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  transcriptHint: {
+    fontSize: 13,
+    marginTop: 10,
+    lineHeight: 18,
   },
   sectionTitle: {
     marginBottom: 6,
