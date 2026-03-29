@@ -24,12 +24,9 @@ export default function TabLayout() {
             }}
           >
             <Tabs.Screen
-              name="progress"
+              name="profile"
               options={{
-                title: "Profile",
-                tabBarIcon: ({ color }) => (
-                  <IconSymbol size={28} name="person.fill" color={color} />
-                ),
+                href: null,
               }}
             />
             <Tabs.Screen
@@ -51,10 +48,18 @@ export default function TabLayout() {
               }}
             />
             <Tabs.Screen
+              name="progress"
+              options={{
+                title: "Progress",
+                tabBarIcon: ({ color }) => (
+                  <IconSymbol size={28} name="star.fill" color={color} />
+                ),
+              }}
+            />
+            <Tabs.Screen
               name="history"
               options={{
-                title: 'History',
-                tabBarIcon: ({ color }) => <IconSymbol size={28} name="clock.arrow.circlepath" color={color} />,
+                href: null,
               }}
             />
             <Tabs.Screen

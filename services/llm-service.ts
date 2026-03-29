@@ -1,5 +1,8 @@
 import { K2_CONFIG, validateConfig } from "@/config/k2-config";
-import type { CorrectionFocusId, PracticeContextId } from "@/constants/speech-coach";
+import type {
+  CorrectionFocusId,
+  PracticeContextId,
+} from "@/constants/speech-coach";
 import type {
   ImprovementGoalId,
   ProficiencyLevel,
@@ -167,9 +170,11 @@ function coerceAnalysisResult(raw: unknown): SpeechAnalysisResult {
  * Safely extract and validate fields from a parsed JSON object
  */
 function validateAndNormalizeAnalysis(obj: any): SpeechAnalysisResult {
-  const vagueLanguage = Array.isArray(obj?.vagueLanguage) ? obj.vagueLanguage : [];
+  const vagueLanguage = Array.isArray(obj?.vagueLanguage)
+    ? obj.vagueLanguage
+    : [];
   const vs =
-    typeof obj?.vagueness_score === 'number'
+    typeof obj?.vagueness_score === "number"
       ? Math.round(Math.min(100, Math.max(0, obj.vagueness_score)))
       : Math.min(100, vagueLanguage.length * 14);
   return {
@@ -182,6 +187,7 @@ function validateAndNormalizeAnalysis(obj: any): SpeechAnalysisResult {
         : 50,
     details:
       typeof obj?.details === "string" ? obj.details : "Analysis complete.",
+    vagueness_score: vs,
   };
 }
 
@@ -664,6 +670,116 @@ export async function analyzeSpeechPatterns(
   throw new Error(
     `Failed to analyze speech: ${lastError?.message || "Unknown error"}`,
   );
+}
+
+export async function generateDailyWordChallengeWords(
+  proficiencyLevel?: ProficiencyLevel,
+  improvementGoals?: ImprovementGoalId[],
+  age?: number,
+): Promise<string[]> {
+  const apiKey = getApiKey();
+  const endpoint = getApiEndpoint();
+  const model = getModelName();
+
+  const goalsText =
+    improvementGoals && improvementGoals.length > 0
+      ? improvementGoals.join(", ")
+      : "not specified";
+
+  const prompt = `Generate exactly 3 practical English words for a speaking practice challenge.
+Return ONLY valid JSON in this exact format: {"words":["word1","word2","word3"]}
+Rules:
+- single words only (no spaces)
+- lowercase
+- avoid slang
+- useful in everyday speaking, presentations, meetings, and interviews
+- each word should be distinct and moderately advanced
+Context:
+- Proficiency: ${proficiencyLevel ?? "intermediate"}
+- Goals: ${goalsText}
+- Age: ${typeof age === "number" ? Math.round(age) : "not specified"}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a strict JSON generator. Output only valid JSON and no extra text.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        stream: false,
+        temperature: 0.2,
+        max_tokens: 180,
+      }),
+      signal: controller.signal,
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      throw new Error(
+        `Daily words API error ${response.status}: ${responseText}`,
+      );
+    }
+
+    const data = JSON.parse(responseText) as {
+      choices?: Array<{
+        message?: { content?: string | Array<{ text?: string }> };
+      }>;
+    };
+
+    const rawContent = data.choices?.[0]?.message?.content;
+    const content =
+      typeof rawContent === "string"
+        ? rawContent
+        : Array.isArray(rawContent)
+          ? rawContent
+              .map((part) => (typeof part?.text === "string" ? part.text : ""))
+              .join("")
+          : "";
+
+    if (!content.trim()) {
+      throw new Error("Daily words response was empty");
+    }
+
+    const jsonString = extractFirstJsonObject(content.trim());
+    if (!jsonString) {
+      throw new Error("Could not extract JSON for daily words");
+    }
+
+    const parsed = JSON.parse(jsonString) as { words?: unknown };
+    const words = Array.isArray(parsed.words)
+      ? parsed.words
+          .filter((w): w is string => typeof w === "string")
+          .map((w) => w.toLowerCase().trim())
+          .filter((w) => /^[a-z]{3,20}$/.test(w))
+      : [];
+
+    const uniqueWords = Array.from(new Set(words)).slice(0, 3);
+    if (uniqueWords.length < 3) {
+      throw new Error("Model did not return 3 valid challenge words");
+    }
+
+    return uniqueWords;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**

@@ -1,4 +1,3 @@
-import { Link } from "expo-router";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, {
   useCallback,
@@ -23,8 +22,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
-import { getCorrectionFocusTitle } from "@/constants/speech-coach";
-import { PRACTICE_CONTEXT_OPTIONS } from "@/constants/speech-coach";
+import { IconSymbol } from "@/components/ui/icon-symbol";
+import {
+  getCorrectionFocusTitle,
+  PRACTICE_CONTEXT_OPTIONS,
+} from "@/constants/speech-coach";
 import { useCoachContext } from "@/context/coach-context";
 import { useProfile } from "@/context/profile-context";
 import { useProgress } from "@/context/progress-context";
@@ -34,7 +36,11 @@ import {
 } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
-import { saveSpeechAnalysisHistory } from "@/services/firebase";
+import {
+  saveSpeechAnalysisHistory,
+  subscribeSpeechAnalysisHistory,
+  type SpeechAnalyticsHistoryRecord,
+} from "@/services/firebase";
 import {
   analyzeSpeechPatterns,
   validateApiConfiguration,
@@ -58,14 +64,12 @@ export default function AnalyticsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const {
     fullTranscript,
-    topContentWords,
     segments,
     archivedSessions,
     appendSegment,
     startNewRecordingSession,
     removeArchivedSession,
     clearArchivedSessions,
-    clearTranscript,
     ready,
   } = useTranscript();
   const router = useRouter();
@@ -76,6 +80,9 @@ export default function AnalyticsScreen() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [analysisHistoryRows, setAnalysisHistoryRows] = useState<
+    SpeechAnalyticsHistoryRecord[]
+  >([]);
   const {
     recording: backgroundRecording,
     start,
@@ -92,8 +99,57 @@ export default function AnalyticsScreen() {
   const muted = useThemeColor({}, "icon");
   const cardBg = colorScheme === "dark" ? "#1c2124" : "#f0f4f8";
   const borderColor = colorScheme === "dark" ? "#334155" : "#cbd5e1";
+  const accent = colorScheme === "dark" ? "#7dd3fc" : "#0369a1";
+  const accentSoft = colorScheme === "dark" ? "#164e63" : "#bae6fd";
 
   const recentArchivedSessions = archivedSessions.slice(0, 8);
+
+  useEffect(() => {
+    return subscribeSpeechAnalysisHistory(
+      (rows) => setAnalysisHistoryRows(rows),
+      () => setAnalysisHistoryRows([]),
+      80,
+    );
+  }, []);
+
+  const improvementSummary = useMemo(() => {
+    if (analysisHistoryRows.length < 2) {
+      return null;
+    }
+
+    const chronological = [...analysisHistoryRows].reverse();
+    const first = chronological[0];
+    const latest = chronological[chronological.length - 1];
+
+    const scoreDelta = latest.overallScore - first.overallScore;
+    const fillerDelta = latest.fillerRatePercent - first.fillerRatePercent;
+    const vagueDelta = latest.vaguenessScore - first.vaguenessScore;
+
+    const topAreas: string[] = [];
+    if (latest.fillerRatePercent >= 6) {
+      topAreas.push("Reduce filler words by pausing between ideas.");
+    }
+    if (latest.vaguenessScore >= 55) {
+      topAreas.push("Use more concrete examples instead of vague phrasing.");
+    }
+    if (latest.repetitionRatePercent >= 12) {
+      topAreas.push("Trim repeated phrases to keep points concise.");
+    }
+    if (topAreas.length === 0) {
+      topAreas.push(
+        "Keep consistency high and focus on polishing delivery confidence.",
+      );
+    }
+
+    return {
+      sessionsTracked: chronological.length,
+      scoreDelta,
+      fillerDelta,
+      vagueDelta,
+      latest,
+      topAreas,
+    };
+  }, [analysisHistoryRows]);
 
   const practiceTitleById = useMemo(() => {
     return new Map(
@@ -278,21 +334,19 @@ export default function AnalyticsScreen() {
 
     try {
       if (__DEV__) {
-        console.log('═══════════════════════════════════════════════════════');
-        console.log('📊 ANALYTICS PAGE - INITIATING ANALYSIS');
-        console.log('═══════════════════════════════════════════════════════');
+        console.log("═══════════════════════════════════════════════════════");
+        console.log("📊 ANALYTICS PAGE - INITIATING ANALYSIS");
+        console.log("═══════════════════════════════════════════════════════");
         console.log(
-          `📝 Input Text: ${transcriptToAnalyze.substring(0, 100)}${transcriptToAnalyze.length > 100 ? '...' : ''}`,
+          `📝 Input Text: ${transcriptToAnalyze.substring(0, 100)}${transcriptToAnalyze.length > 100 ? "..." : ""}`,
         );
         console.log(`🎯 Selected Focus: ${selectedFocus}`);
         console.log(`👤 User Proficiency: ${profile.proficiencyLevel}`);
         console.log(
-          `🎯 Improvement Goals: ${profile.improvementGoals.join(', ')}`,
+          `🎯 Improvement Goals: ${profile.improvementGoals.join(", ")}`,
         );
-        console.log(
-          `📏 Text Length: ${transcriptToAnalyze.length} characters`,
-        );
-        console.log('───────────────────────────────────────────────────────');
+        console.log(`📏 Text Length: ${transcriptToAnalyze.length} characters`);
+        console.log("───────────────────────────────────────────────────────");
       }
 
       const result = await analyzeSpeechPatterns(
@@ -378,25 +432,6 @@ export default function AnalyticsScreen() {
     setError(null);
   };
 
-  const [clearingTranscript, setClearingTranscript] = useState(false);
-
-  const handleClearStoredTranscript = async () => {
-    if (clearingTranscript) return;
-    setClearingTranscript(true);
-    try {
-      await clearTranscript();
-      setAnalysis(null);
-      setError(null);
-    } catch {
-      Alert.alert(
-        "Couldn’t clear",
-        "Storage didn’t update. Try again or restart the app.",
-      );
-    } finally {
-      setClearingTranscript(false);
-    }
-  };
-
   const ScoreIndicator = ({ score }: { score: number }) => {
     const getScoreColor = () => {
       if (score >= 80) return "#10b981"; // Green
@@ -424,235 +459,36 @@ export default function AnalyticsScreen() {
       <ScrollView style={[styles.container, { backgroundColor: bgColor }]}>
         {/* Header */}
         <View style={styles.header}>
-          <ThemedText type="title">Speech Analytics</ThemedText>
+          <Pressable
+            onPress={() => router.push("/(tabs)/profile")}
+            style={({ pressed }) => [
+              styles.profileBtn,
+              styles.profileBtnFloating,
+              {
+                borderColor: accentSoft,
+                backgroundColor:
+                  accentSoft + (colorScheme === "dark" ? "55" : "99"),
+                opacity: pressed ? 0.85 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile"
+          >
+            <IconSymbol size={17} name="person.fill" color={accent} />
+          </Pressable>
+          <ThemedText style={[styles.kicker, { color: accent }]}>
+            Name of Product
+          </ThemedText>
+          <ThemedText type="title" style={styles.headerTitle}>
+            Speech Analytics
+          </ThemedText>
           <ThemedText style={styles.subtitle}>
             Get AI-powered feedback on your speech patterns
           </ThemedText>
         </View>
 
-        <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
-          <Text style={[styles.label, { color: textColor }]}>
-            Session history
-          </Text>
-          <Text style={[styles.transcriptMeta, { color: muted }]}>
-            Each analysis saves scores and metrics to Firebase (not your raw
-            transcript). View trends on the History tab.
-          </Text>
-          <Link href="/history" asChild>
-            <Pressable
-              style={styles.historyLinkBtn}
-              accessibilityRole="link"
-              accessibilityLabel="Open session history"
-            >
-              <Text style={[styles.historyLinkText, { color: "#007AFF" }]}>
-                Open History →
-              </Text>
-            </Pressable>
-          </Link>
-        </ThemedView>
-
-        {ready && (
-          <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
-            <Text style={[styles.label, { color: textColor }]}>
-              Saved transcript
-            </Text>
-            <Text style={[styles.transcriptMeta, { color: muted }]}>
-              {segments.length} segment{segments.length === 1 ? "" : "s"} ·
-              built from listening sessions and text you analyze or save here
-            </Text>
-            {fullTranscript.trim().length > 0 ? (
-              <ScrollView
-                style={styles.transcriptScroll}
-                nestedScrollEnabled
-                showsVerticalScrollIndicator
-              >
-                <Text style={[styles.transcriptBody, { color: textColor }]}>
-                  {fullTranscript}
-                </Text>
-              </ScrollView>
-            ) : (
-              <Text style={[styles.emptyTranscript, { color: muted }]}>
-                Nothing saved yet. Turn off a listening session on the Coach tab
-                or analyze / save text below.
-              </Text>
-            )}
-            <Text style={[styles.label, { color: textColor, marginTop: 16 }]}>
-              Top words (not including stop words)
-            </Text>
-            {topContentWords.length > 0 ? (
-              <View style={styles.chipWrap}>
-                {topContentWords.map(({ word, count }) => (
-                  <View
-                    key={word}
-                    style={[styles.chip, { borderColor: muted + "55" }]}
-                  >
-                    <Text style={[styles.chipText, { color: textColor }]}>
-                      {word} <Text style={{ color: muted }}>({count})</Text>
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={[styles.emptyTranscript, { color: muted }]}>
-                Add more speech to see frequent content words.
-              </Text>
-            )}
-            {fullTranscript.trim().length > 0 || segments.length > 0 ? (
-              <Pressable
-                style={[
-                  styles.linkBtn,
-                  clearingTranscript && styles.linkBtnDisabled,
-                ]}
-                onPress={() => void handleClearStoredTranscript()}
-                disabled={clearingTranscript}
-                accessibilityRole="button"
-                accessibilityLabel="Clear saved transcript and analysis"
-              >
-                <Text style={styles.linkBtnText}>
-                  {clearingTranscript ? "Clearing…" : "Clear saved transcript"}
-                </Text>
-              </Pressable>
-            ) : null}
-          </ThemedView>
-        )}
-
-        {ready && (
-          <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
-            <View style={styles.historySectionHeader}>
-              <Text style={[styles.label, { color: textColor }]}>
-                Session history
-              </Text>
-              {recentArchivedSessions.length > 0 ? (
-                <Pressable
-                  onPress={confirmClearAllHistory}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear all session history"
-                >
-                  <Text style={styles.historyClearAllText}>Clear all</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            <Text style={[styles.transcriptMeta, { color: muted }]}>
-              Previous transcripts are archived locally when a new recording
-              starts.
-            </Text>
-
-            {recentArchivedSessions.length === 0 ? (
-              <Text style={[styles.emptyTranscript, { color: muted }]}>
-                No archived sessions yet.
-              </Text>
-            ) : (
-              <ScrollView
-                style={styles.historyScroll}
-                nestedScrollEnabled
-                showsVerticalScrollIndicator
-              >
-                <View style={styles.historyList}>
-                  {recentArchivedSessions.map((session) => {
-                    const preview = session.transcript
-                      .replace(/\s+/g, " ")
-                      .trim();
-                    const trigger =
-                      session.reason === "live" ? "live" : "background";
-
-                    return (
-                      <View
-                        key={session.id}
-                        style={[
-                          styles.historyCard,
-                          {
-                            borderColor,
-                            backgroundColor:
-                              colorScheme === "dark" ? "#111827" : "#ffffff",
-                          },
-                        ]}
-                      >
-                        <View style={styles.historyHeader}>
-                          <Text
-                            style={[styles.historyReason, { color: textColor }]}
-                          >
-                            {getArchiveReasonLabel(session)}
-                          </Text>
-                          <Text style={[styles.historyTime, { color: muted }]}>
-                            {formatArchiveTime(session.archivedAt)}
-                          </Text>
-                        </View>
-
-                        <Text style={[styles.historyMeta, { color: muted }]}>
-                          {session.segments.length} segment
-                          {session.segments.length === 1 ? "" : "s"}
-                        </Text>
-
-                        <Text
-                          style={[styles.historyPreview, { color: textColor }]}
-                        >
-                          {preview.length > 180
-                            ? `${preview.slice(0, 180)}…`
-                            : preview}
-                        </Text>
-
-                        <Pressable
-                          style={({ pressed }) => [
-                            styles.historyAnalyzeBtn,
-                            { opacity: pressed ? 0.85 : 1 },
-                          ]}
-                          onPress={() =>
-                            void handleAnalyze(session.transcript, trigger)
-                          }
-                          disabled={isLoading || processingBackgroundAudio}
-                        >
-                          <Text style={styles.historyAnalyzeBtnText}>
-                            Analyze this session
-                          </Text>
-                        </Pressable>
-
-                        <Pressable
-                          style={({ pressed }) => [
-                            styles.historyDeleteBtn,
-                            { opacity: pressed ? 0.75 : 1 },
-                          ]}
-                          onPress={() =>
-                            confirmDeleteArchivedSession(session.id)
-                          }
-                          accessibilityRole="button"
-                          accessibilityLabel="Delete archived session"
-                        >
-                          <Text style={styles.historyDeleteBtnText}>
-                            Delete
-                          </Text>
-                        </Pressable>
-                      </View>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            )}
-          </ThemedView>
-        )}
-
         {/* Input Section */}
         <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
-          <Text style={[styles.label, { color: textColor }]}>
-            Saved speech or conversation:
-          </Text>
-          <TextInput
-            style={[
-              styles.textInput,
-              {
-                backgroundColor: colorScheme === "dark" ? "#2b3139" : "#ffffff",
-                color: textColor,
-                borderColor: colorScheme === "dark" ? "#404854" : "#e5e7eb",
-              },
-            ]}
-            placeholder="Your saved transcript will appear here..."
-            placeholderTextColor={
-              colorScheme === "dark" ? "#9ca3af" : "#9ca3af"
-            }
-            multiline
-            numberOfLines={6}
-            value={fullTranscript}
-            editable={false}
-          />
           <View style={styles.backgroundCaptureSection}>
             <Pressable
               style={[
@@ -677,6 +513,25 @@ export default function AnalyticsScreen() {
               </Text>
             ) : null}
           </View>
+
+          <TextInput
+            style={[
+              styles.textInput,
+              {
+                backgroundColor: colorScheme === "dark" ? "#2b3139" : "#ffffff",
+                color: textColor,
+                borderColor: colorScheme === "dark" ? "#404854" : "#e5e7eb",
+              },
+            ]}
+            placeholder="Your saved transcript will appear here..."
+            placeholderTextColor={
+              colorScheme === "dark" ? "#9ca3af" : "#9ca3af"
+            }
+            multiline
+            numberOfLines={6}
+            value={fullTranscript}
+            editable={false}
+          />
         </ThemedView>
 
         {/* Action Buttons */}
@@ -807,14 +662,210 @@ export default function AnalyticsScreen() {
           </ThemedView>
         )}
 
-        {/* Empty State */}
-        {!analysis && !isLoading && fullTranscript.trim() && !error && (
-          <ThemedView style={[styles.emptyState, { backgroundColor: cardBg }]}>
-            <Text style={[styles.emptyStateText, { color: textColor }]}>
-              Tap {"\u201c"}Analyze Speech{"\u201d"} to get started
+        {ready && (
+          <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
+            <View style={styles.historySectionHeader}>
+              <Text style={[styles.label, { color: textColor }]}>
+                Session history
+              </Text>
+              {recentArchivedSessions.length > 0 ? (
+                <Pressable
+                  onPress={confirmClearAllHistory}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear all session history"
+                >
+                  <Text style={styles.historyClearAllText}>Clear all</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={[styles.transcriptMeta, { color: muted }]}>
+              Previous transcripts are archived locally when a new recording
+              starts.
             </Text>
+
+            {recentArchivedSessions.length === 0 ? (
+              <Text style={[styles.emptyTranscript, { color: muted }]}>
+                No archived sessions yet.
+              </Text>
+            ) : (
+              <ScrollView
+                style={styles.historyScroll}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+              >
+                <View style={styles.historyList}>
+                  {recentArchivedSessions.map((session) => {
+                    const preview = session.transcript
+                      .replace(/\s+/g, " ")
+                      .trim();
+                    const trigger =
+                      session.reason === "live" ? "live" : "background";
+
+                    return (
+                      <View
+                        key={session.id}
+                        style={[
+                          styles.historyCard,
+                          {
+                            borderColor,
+                            backgroundColor:
+                              colorScheme === "dark" ? "#111827" : "#ffffff",
+                          },
+                        ]}
+                      >
+                        <View style={styles.historyHeader}>
+                          <Text
+                            style={[styles.historyReason, { color: textColor }]}
+                          >
+                            {getArchiveReasonLabel(session)}
+                          </Text>
+                          <Text style={[styles.historyTime, { color: muted }]}>
+                            {formatArchiveTime(session.archivedAt)}
+                          </Text>
+                        </View>
+
+                        <Text style={[styles.historyMeta, { color: muted }]}>
+                          {session.segments.length} segment
+                          {session.segments.length === 1 ? "" : "s"}
+                        </Text>
+
+                        <Text
+                          style={[styles.historyPreview, { color: textColor }]}
+                        >
+                          {preview.length > 180
+                            ? `${preview.slice(0, 180)}…`
+                            : preview}
+                        </Text>
+
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.historyAnalyzeBtn,
+                            { opacity: pressed ? 0.85 : 1 },
+                          ]}
+                          onPress={() =>
+                            void handleAnalyze(session.transcript, trigger)
+                          }
+                          disabled={isLoading || processingBackgroundAudio}
+                        >
+                          <Text style={styles.historyAnalyzeBtnText}>
+                            Analyze this session
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.historyDeleteBtn,
+                            { opacity: pressed ? 0.75 : 1 },
+                          ]}
+                          onPress={() =>
+                            confirmDeleteArchivedSession(session.id)
+                          }
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete archived session"
+                        >
+                          <Text style={styles.historyDeleteBtnText}>
+                            Delete
+                          </Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            )}
           </ThemedView>
         )}
+
+        <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
+          <Text style={[styles.label, { color: textColor }]}>
+            Main areas to improve
+          </Text>
+
+          {!improvementSummary ? (
+            <Text style={[styles.emptyTranscript, { color: muted }]}>
+              Run at least two analyses to unlock improvement stats.
+            </Text>
+          ) : (
+            <>
+              <View style={styles.improvementStatRow}>
+                <View style={styles.improvementStatCard}>
+                  <Text style={[styles.improvementStatLabel, { color: muted }]}>
+                    Quality score
+                  </Text>
+                  <Text
+                    style={[
+                      styles.improvementStatValue,
+                      {
+                        color:
+                          improvementSummary.scoreDelta >= 0
+                            ? "#10b981"
+                            : "#ef4444",
+                      },
+                    ]}
+                  >
+                    {improvementSummary.scoreDelta >= 0 ? "+" : ""}
+                    {Math.round(improvementSummary.scoreDelta)}
+                  </Text>
+                </View>
+
+                <View style={styles.improvementStatCard}>
+                  <Text style={[styles.improvementStatLabel, { color: muted }]}>
+                    Filler rate
+                  </Text>
+                  <Text
+                    style={[
+                      styles.improvementStatValue,
+                      {
+                        color:
+                          improvementSummary.fillerDelta <= 0
+                            ? "#10b981"
+                            : "#ef4444",
+                      },
+                    ]}
+                  >
+                    {improvementSummary.fillerDelta > 0 ? "+" : ""}
+                    {improvementSummary.fillerDelta.toFixed(1)}%
+                  </Text>
+                </View>
+
+                <View style={styles.improvementStatCard}>
+                  <Text style={[styles.improvementStatLabel, { color: muted }]}>
+                    Vagueness
+                  </Text>
+                  <Text
+                    style={[
+                      styles.improvementStatValue,
+                      {
+                        color:
+                          improvementSummary.vagueDelta <= 0
+                            ? "#10b981"
+                            : "#ef4444",
+                      },
+                    ]}
+                  >
+                    {improvementSummary.vagueDelta > 0 ? "+" : ""}
+                    {Math.round(improvementSummary.vagueDelta)}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={[styles.improvementHint, { color: muted }]}>
+                Based on {improvementSummary.sessionsTracked} analyzed sessions.
+              </Text>
+
+              <View style={styles.improvementList}>
+                {improvementSummary.topAreas.map((tip, index) => (
+                  <Text
+                    key={`${tip}-${index}`}
+                    style={[styles.improvementItem, { color: textColor }]}
+                  >
+                    • {tip}
+                  </Text>
+                ))}
+              </View>
+            </>
+          )}
+        </ThemedView>
       </ScrollView>
     </SafeAreaView>
   );
@@ -827,6 +878,33 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: 24,
+    position: "relative",
+  },
+  kicker: {
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+  headerTitle: {
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "700",
+  },
+  profileBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderRadius: 9999,
+    width: 34,
+    height: 34,
+  },
+  profileBtnFloating: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    zIndex: 2,
   },
   subtitle: {
     marginTop: 8,
@@ -851,7 +929,8 @@ const styles = StyleSheet.create({
     minHeight: 120,
   },
   backgroundCaptureSection: {
-    marginTop: 14,
+    marginTop: 4,
+    marginBottom: 10,
     gap: 8,
   },
   backgroundCaptureBtn: {
@@ -985,49 +1064,15 @@ const styles = StyleSheet.create({
     marginVertical: 4,
     lineHeight: 18,
   },
-  emptyState: {
-    padding: 24,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 20,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    opacity: 0.6,
-  },
   transcriptMeta: {
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 10,
   },
-  transcriptScroll: {
-    maxHeight: 160,
-    marginBottom: 4,
-  },
-  transcriptBody: {
-    fontSize: 14,
-    lineHeight: 22,
-  },
   emptyTranscript: {
     fontSize: 14,
     lineHeight: 20,
     fontStyle: "italic",
-  },
-  chipWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 8,
-  },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  chipText: {
-    fontSize: 13,
-    fontWeight: "600",
   },
   historyList: {
     gap: 12,
@@ -1100,27 +1145,38 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
   },
-  linkBtn: {
-    marginTop: 14,
-    alignSelf: "flex-start",
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+  improvementStatRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 10,
   },
-  linkBtnDisabled: {
-    opacity: 0.5,
+  improvementStatCard: {
+    flex: 1,
+    borderRadius: 8,
+    backgroundColor: "rgba(148, 163, 184, 0.12)",
+    paddingVertical: 10,
+    paddingHorizontal: 10,
   },
-  linkBtnText: {
+  improvementStatLabel: {
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 4,
+  },
+  improvementStatValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  improvementHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  improvementList: {
+    gap: 6,
+  },
+  improvementItem: {
     fontSize: 14,
-    color: "#ef4444",
-    fontWeight: "600",
-  },
-  historyLinkBtn: {
-    alignSelf: "flex-start",
-    marginTop: 4,
-    paddingVertical: 8,
-  },
-  historyLinkText: {
-    fontSize: 15,
-    fontWeight: "600",
+    lineHeight: 20,
   },
 });

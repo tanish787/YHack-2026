@@ -1,17 +1,17 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useEffect, useMemo, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { getCorrectionFocusTitle } from '@/constants/speech-coach';
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import { getCorrectionFocusTitle } from "@/constants/speech-coach";
+import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useThemeColor } from "@/hooks/use-theme-color";
 import {
   isFirebaseConfigured,
   subscribeSpeechAnalysisHistory,
   type SpeechAnalyticsHistoryRecord,
-} from '@/services/firebase';
-import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useThemeColor } from '@/hooks/use-theme-color';
+} from "@/services/firebase";
 
 const CHART_MAX_BARS = 14;
 
@@ -37,12 +37,12 @@ function MiniTrend({
   label: string;
   values: number[];
   format: (n: number) => string;
-  colorScheme: 'light' | 'dark';
+  colorScheme: "light" | "dark";
   muted: string;
   accent: string;
 }) {
   const norms = normalizeSeries(values);
-  const barBg = colorScheme === 'dark' ? '#2b3139' : '#e5e7eb';
+  const barBg = colorScheme === "dark" ? "#2b3139" : "#e5e7eb";
   return (
     <View style={styles.trendBlock}>
       <Text style={[styles.trendLabel, { color: muted }]}>{label}</Text>
@@ -66,11 +66,11 @@ function MiniTrend({
       </View>
       <View style={styles.trendEnds}>
         <Text style={[styles.trendEndText, { color: muted }]}>
-          {values.length ? format(values[0]) : '—'}
+          {values.length ? format(values[0]) : "—"}
         </Text>
         <Text style={[styles.trendEndText, { color: muted }]}>→</Text>
         <Text style={[styles.trendEndText, { color: muted }]}>
-          {values.length ? format(values[values.length - 1]) : '—'}
+          {values.length ? format(values[values.length - 1]) : "—"}
         </Text>
       </View>
     </View>
@@ -78,13 +78,13 @@ function MiniTrend({
 }
 
 export default function HistoryScreen() {
-  const colorScheme = useColorScheme() ?? 'light';
-  const bgColor = useThemeColor({}, 'background');
-  const textColor = useThemeColor({}, 'text');
-  const muted = useThemeColor({}, 'icon');
-  const tint = useThemeColor({}, 'tint');
-  const cardBg = colorScheme === 'dark' ? '#1c2124' : '#f0f4f8';
-  const accent = colorScheme === 'dark' ? '#38bdf8' : '#0284c7';
+  const colorScheme = useColorScheme() ?? "light";
+  const bgColor = useThemeColor({}, "background");
+  const textColor = useThemeColor({}, "text");
+  const muted = useThemeColor({}, "icon");
+  const tint = useThemeColor({}, "tint");
+  const cardBg = colorScheme === "dark" ? "#1c2124" : "#f0f4f8";
+  const accent = colorScheme === "dark" ? "#38bdf8" : "#0284c7";
 
   const [rows, setRows] = useState<SpeechAnalyticsHistoryRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +144,9 @@ export default function HistoryScreen() {
         contentContainerStyle={styles.contentBottom}
       >
         <View style={styles.header}>
+          <ThemedText style={[styles.kicker, { color: tint }]}>
+            Name of Product
+          </ThemedText>
           <ThemedText type="title">Session history</ThemedText>
           <ThemedText style={[styles.subtitle, { color: muted }]}>
             Metrics saved when you run Analyze Speech (no transcript in the
@@ -159,8 +162,8 @@ export default function HistoryScreen() {
             </Text>
           </ThemedView>
         ) : error ? (
-          <ThemedView style={[styles.card, { backgroundColor: '#fee2e2' }]}>
-            <Text style={[styles.body, { color: '#991b1b' }]}>{error}</Text>
+          <ThemedView style={[styles.card, { backgroundColor: "#fee2e2" }]}>
+            <Text style={[styles.body, { color: "#991b1b" }]}>{error}</Text>
           </ThemedView>
         ) : rows.length === 0 ? (
           <ThemedView style={[styles.card, { backgroundColor: cardBg }]}>
@@ -216,7 +219,9 @@ export default function HistoryScreen() {
                   <MiniTrend
                     label="Words / min (when known)"
                     values={wpmSeries}
-                    format={(n) => (Number.isFinite(n) ? `${Math.round(n)}` : '—')}
+                    format={(n) =>
+                      Number.isFinite(n) ? `${Math.round(n)}` : "—"
+                    }
                     colorScheme={colorScheme}
                     muted={muted}
                     accent={accent}
@@ -239,7 +244,7 @@ export default function HistoryScreen() {
                   styles.sessionCard,
                   {
                     backgroundColor: cardBg,
-                    borderColor: muted + '33',
+                    borderColor: muted + "33",
                   },
                 ]}
               >
@@ -267,9 +272,7 @@ export default function HistoryScreen() {
                   <MetricChip
                     label="WPM"
                     value={
-                      row.wordsPerMinute != null
-                        ? `${row.wordsPerMinute}`
-                        : '—'
+                      row.wordsPerMinute != null ? `${row.wordsPerMinute}` : "—"
                     }
                     sub="From segment timestamps when reliable"
                     textColor={textColor}
@@ -337,6 +340,13 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 20,
   },
+  kicker: {
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
   subtitle: {
     marginTop: 8,
     fontSize: 15,
@@ -367,30 +377,30 @@ const styles = StyleSheet.create({
   },
   trendLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   trendBars: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+    flexDirection: "row",
+    alignItems: "flex-end",
     height: 72,
     gap: 4,
   },
   trendBarTrack: {
     flex: 1,
-    height: '100%',
+    height: "100%",
     borderRadius: 4,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
+    justifyContent: "flex-end",
+    overflow: "hidden",
   },
   trendBarFill: {
-    width: '100%',
+    width: "100%",
     borderRadius: 4,
     minHeight: 4,
   },
   trendEnds: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   trendEndText: {
     fontSize: 11,
@@ -405,14 +415,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sessionTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: 12,
     marginBottom: 12,
   },
   sessionScore: {
     fontSize: 28,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   sessionMetaCol: {
     flex: 1,
@@ -423,26 +433,26 @@ const styles = StyleSheet.create({
   },
   sessionFocus: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   metricsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
   },
   metricChip: {
-    width: '47%',
+    width: "47%",
     minWidth: 140,
   },
   metricLabel: {
     fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+    fontWeight: "600",
+    textTransform: "uppercase",
     letterSpacing: 0.4,
   },
   metricValue: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: "700",
     marginTop: 2,
   },
   metricSub: {

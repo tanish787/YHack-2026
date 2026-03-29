@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Platform,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,16 +12,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
-import {
-  IMPROVEMENT_GOALS,
-  PROFICIENCY_LEVELS,
-  type ImprovementGoalId,
-  type ProficiencyLevel,
-} from "@/constants/user-profile";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useProfile } from "@/context/profile-context";
 import { useProgress } from "@/context/progress-context";
+import { useTranscript } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
+import { generateDailyWordChallengeWords } from "@/services/llm-service";
 
 const ACHIEVEMENTS_CONFIG = [
   {
@@ -70,51 +69,185 @@ const ACHIEVEMENTS_CONFIG = [
     description: "Complete 50 analyses",
     icon: "🏆",
   },
+  {
+    id: "wordsmith_daily",
+    label: "Wordsmith",
+    description: "Complete your daily word challenge",
+    icon: "📚",
+  },
 ];
 
+const DAILY_WORD_BANK = [
+  "concise",
+  "impactful",
+  "precise",
+  "insightful",
+  "compelling",
+  "credible",
+  "cohesive",
+  "nuanced",
+  "confident",
+  "strategic",
+  "perspective",
+  "context",
+  "clarify",
+  "evidence",
+  "intentional",
+  "articulate",
+  "focused",
+  "practical",
+  "relevant",
+  "specific",
+  "structure",
+  "prioritize",
+  "objective",
+  "adaptable",
+  "effective",
+  "collaborative",
+  "thoughtful",
+  "consistent",
+  "measurable",
+  "actionable",
+];
+
+const DAILY_WORDS_STORAGE_PREFIX = "@speech_coach/daily_words/";
+
+function getDateKey(date = new Date()): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function hashString(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function getFallbackDailyWords(dateKey: string, count = 3): string[] {
+  const words = [...DAILY_WORD_BANK];
+  const seed = hashString(dateKey);
+  const picks: string[] = [];
+
+  let cursor = seed % words.length;
+  while (picks.length < count && words.length > 0) {
+    cursor = (cursor + 7) % words.length;
+    picks.push(words.splice(cursor, 1)[0]);
+    if (words.length > 0) {
+      cursor %= words.length;
+    }
+  }
+
+  return picks;
+}
+
 export default function ProgressScreen() {
+  const router = useRouter();
   const colorScheme = useColorScheme() ?? "light";
+  const { profile } = useProfile();
+  const { fullTranscript, archivedSessions } = useTranscript();
   const { width } = useWindowDimensions();
   const isCompact = width < 390;
   const isVeryCompact = width < 350;
+
   const {
     progress,
-    getFillerWordTrend,
     getStreakData,
+    hasClaimedWordReward,
+    claimWordReward,
     checkAndUnlockAchievements,
   } = useProgress();
-  const { profile, setProficiencyLevel, setAge, toggleGoal } = useProfile();
 
   const textColor = useThemeColor({}, "text");
   const bg = useThemeColor({}, "background");
 
   const isDark = colorScheme === "dark";
-  const accentColor = isDark ? "#7dd3fc" : "#0284c7";
+  const accentColor = isDark ? "#7dd3fc" : "#0369a1";
+  const accentSoft = isDark ? "#164e63" : "#bae6fd";
   const successColor = isDark ? "#86efac" : "#22c55e";
   const warningColor = isDark ? "#fbbf24" : "#f59e0b";
   const subText = isDark ? "#d1d5db" : "#6b7280";
   const lockedColor = isDark ? "#4b5563" : "#9ca3af";
 
   const streakData = useMemo(() => getStreakData(), [getStreakData]);
-  const fillerTrend = useMemo(() => getFillerWordTrend(), [getFillerWordTrend]);
+  const todayKey = useMemo(() => getDateKey(), []);
+  const [dailyWords, setDailyWords] = useState<string[]>(() =>
+    getFallbackDailyWords(todayKey),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const storageKey = `${DAILY_WORDS_STORAGE_PREFIX}${todayKey}`;
+
+    const loadDailyWords = async () => {
+      try {
+        const cached = await AsyncStorage.getItem(storageKey);
+        if (cached) {
+          const parsed = JSON.parse(cached) as string[];
+          if (
+            Array.isArray(parsed) &&
+            parsed.length >= 3 &&
+            parsed.every((w) => typeof w === "string")
+          ) {
+            if (!cancelled) {
+              setDailyWords(parsed.slice(0, 3));
+            }
+            return;
+          }
+        }
+
+        const llmWords = await generateDailyWordChallengeWords(
+          profile.proficiencyLevel,
+          profile.improvementGoals,
+          profile.age,
+        );
+
+        if (!cancelled) {
+          setDailyWords(llmWords);
+        }
+        await AsyncStorage.setItem(storageKey, JSON.stringify(llmWords));
+      } catch (error) {
+        const fallback = getFallbackDailyWords(todayKey);
+        if (!cancelled) {
+          setDailyWords(fallback);
+        }
+      }
+    };
+
+    void loadDailyWords();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    todayKey,
+    profile.proficiencyLevel,
+    profile.improvementGoals,
+    profile.age,
+  ]);
+
+  const todaysTranscriptText = useMemo(() => {
+    const todayArchived = archivedSessions
+      .filter(
+        (session) => getDateKey(new Date(session.archivedAt)) === todayKey,
+      )
+      .map((session) => session.transcript)
+      .join(" ");
+
+    return `${fullTranscript} ${todayArchived}`.toLowerCase();
+  }, [archivedSessions, fullTranscript, todayKey]);
+
+  const matchedDailyWords = useMemo(() => {
+    const normalized = todaysTranscriptText.replace(/[^a-zA-Z\s']/g, " ");
+    const tokenSet = new Set(normalized.split(/\s+/).filter(Boolean));
+    return dailyWords.filter((word) => tokenSet.has(word.toLowerCase()));
+  }, [dailyWords, todaysTranscriptText]);
+
+  const hasClaimedToday = hasClaimedWordReward(todayKey);
 
   useEffect(() => {
     checkAndUnlockAchievements();
   }, [checkAndUnlockAchievements, progress]);
-
-  const getFillerTrendIcon = useCallback(() => {
-    if (fillerTrend.percentChange < -10) return "📉";
-    if (fillerTrend.percentChange < 0) return "↘️";
-    if (fillerTrend.percentChange > 10) return "📈";
-    if (fillerTrend.percentChange > 0) return "↗️";
-    return "→";
-  }, [fillerTrend.percentChange]);
-
-  const getTrendColor = useCallback(() => {
-    if (fillerTrend.percentChange < 0) return successColor;
-    if (fillerTrend.percentChange > 0) return warningColor;
-    return subText;
-  }, [fillerTrend.percentChange, successColor, warningColor, subText]);
 
   const getAchievementStatus = useCallback(
     (achievementId: string) => {
@@ -123,27 +256,20 @@ export default function ProgressScreen() {
     [progress.achievements],
   );
 
-  const selectProficiency = useCallback(
-    (level: ProficiencyLevel) => {
-      if (level === profile.proficiencyLevel) return;
-      setProficiencyLevel(level);
-    },
-    [profile.proficiencyLevel, setProficiencyLevel],
-  );
-
-  const adjustAge = useCallback(
-    (delta: number) => {
-      setAge(profile.age + delta);
-    },
-    [profile.age, setAge],
-  );
-
-  const toggleImprovementGoal = useCallback(
-    (goalId: ImprovementGoalId) => {
-      toggleGoal(goalId);
-    },
-    [toggleGoal],
-  );
+  const claimTodayWordReward = useCallback(() => {
+    const points = claimWordReward(todayKey, matchedDailyWords.length);
+    if (points <= 0) {
+      Alert.alert(
+        "No reward yet",
+        "Use at least one challenge word today first.",
+      );
+      return;
+    }
+    Alert.alert(
+      "Reward unlocked",
+      `You earned ${points} points for today's word challenge.`,
+    );
+  }, [claimWordReward, matchedDailyWords.length, todayKey]);
 
   const totalAnalyses = progress.dailyEntries.reduce(
     (sum, entry) => sum + entry.analysisCount,
@@ -159,139 +285,36 @@ export default function ProgressScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
+          <Pressable
+            onPress={() => router.push("/(tabs)/profile")}
+            style={({ pressed }) => [
+              styles.profileBtn,
+              styles.profileBtnFloating,
+              {
+                borderColor: accentSoft,
+                backgroundColor:
+                  accentSoft + (colorScheme === "dark" ? "55" : "99"),
+                opacity: pressed ? 0.85 : 1,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile"
+          >
+            <IconSymbol size={17} name="person.fill" color={accentColor} />
+          </Pressable>
+          <ThemedText style={[styles.kicker, { color: accentColor }]}>
+            Name of Product
+          </ThemedText>
           <ThemedText type="title" style={styles.heading}>
-            Your Profile
+            Your Progress
           </ThemedText>
           <ThemedText style={[styles.subheading, { color: subText }]}>
-            Customize your speech goals and track your journey
+            Track your progress, activity, and achievements
           </ThemedText>
         </View>
 
-        <View style={styles.section}>
-          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            English Proficiency
-          </ThemedText>
-          <View style={styles.optionList}>
-            {PROFICIENCY_LEVELS.map((level) => {
-              const selected = profile.proficiencyLevel === level.id;
-              return (
-                <Pressable
-                  key={level.id}
-                  onPress={() => selectProficiency(level.id)}
-                  style={({ pressed }) => [
-                    styles.optionCard,
-                    {
-                      borderColor: selected ? accentColor : lockedColor,
-                      backgroundColor: selected
-                        ? isDark
-                          ? "#103047"
-                          : "#e0f2fe"
-                        : "transparent",
-                      opacity: pressed ? 0.9 : 1,
-                    },
-                  ]}
-                >
-                  <ThemedText
-                    style={[styles.optionTitle, { color: textColor }]}
-                  >
-                    {level.label}
-                  </ThemedText>
-                  <ThemedText
-                    style={[styles.optionDescription, { color: subText }]}
-                  >
-                    {level.description}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            Focus Goals
-          </ThemedText>
-          <View style={styles.optionList}>
-            {IMPROVEMENT_GOALS.map((goal) => {
-              const selected = profile.improvementGoals.includes(goal.id);
-              return (
-                <Pressable
-                  key={goal.id}
-                  onPress={() => toggleImprovementGoal(goal.id)}
-                  style={({ pressed }) => [
-                    styles.optionCard,
-                    {
-                      borderColor: selected ? successColor : lockedColor,
-                      backgroundColor: selected
-                        ? isDark
-                          ? "#113024"
-                          : "#dcfce7"
-                        : "transparent",
-                      opacity: pressed ? 0.9 : 1,
-                    },
-                  ]}
-                >
-                  <ThemedText
-                    style={[styles.optionTitle, { color: textColor }]}
-                  >
-                    {goal.title}
-                  </ThemedText>
-                  <ThemedText
-                    style={[styles.optionDescription, { color: subText }]}
-                  >
-                    {goal.subtitle}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            Age
-          </ThemedText>
-          <View style={styles.ageRow}>
-            <Pressable
-              onPress={() => adjustAge(-1)}
-              style={({ pressed }) => [
-                styles.ageButton,
-                { borderColor: lockedColor, opacity: pressed ? 0.85 : 1 },
-              ]}
-            >
-              <ThemedText style={[styles.ageButtonText, { color: textColor }]}>
-                -
-              </ThemedText>
-            </Pressable>
-            <View style={styles.ageValueWrap}>
-              <ThemedText style={[styles.ageValue, { color: accentColor }]}>
-                {Math.round(profile.age)}
-              </ThemedText>
-            </View>
-            <Pressable
-              onPress={() => adjustAge(1)}
-              style={({ pressed }) => [
-                styles.ageButton,
-                { borderColor: lockedColor, opacity: pressed ? 0.85 : 1 },
-              ]}
-            >
-              <ThemedText style={[styles.ageButtonText, { color: textColor }]}>
-                +
-              </ThemedText>
-            </Pressable>
-          </View>
-          <ThemedText style={[styles.ageHint, { color: subText }]}>
-            {Platform.OS === "web"
-              ? "Use the buttons to adjust your age."
-              : "Tap minus or plus to adjust your age."}
-          </ThemedText>
-        </View>
-
-        {/* Stats Overview */}
         <View style={styles.statsGrid}>
-          {/* Streak */}
           <View
             style={[
               styles.statBox,
@@ -299,7 +322,7 @@ export default function ProgressScreen() {
               isVeryCompact && styles.statBoxVeryCompact,
             ]}
           >
-            <ThemedText style={[styles.statEmoji]}>🔥</ThemedText>
+            <ThemedText style={styles.statEmoji}>🔥</ThemedText>
             <ThemedText style={[styles.statValue, { color: accentColor }]}>
               {streakData.current}
             </ThemedText>
@@ -308,7 +331,6 @@ export default function ProgressScreen() {
             </ThemedText>
           </View>
 
-          {/* Longest Streak */}
           <View
             style={[
               styles.statBox,
@@ -316,7 +338,7 @@ export default function ProgressScreen() {
               isVeryCompact && styles.statBoxVeryCompact,
             ]}
           >
-            <ThemedText style={[styles.statEmoji]}>📈</ThemedText>
+            <ThemedText style={styles.statEmoji}>📈</ThemedText>
             <ThemedText style={[styles.statValue, { color: successColor }]}>
               {streakData.longest}
             </ThemedText>
@@ -325,7 +347,6 @@ export default function ProgressScreen() {
             </ThemedText>
           </View>
 
-          {/* Total Practices */}
           <View
             style={[
               styles.statBox,
@@ -333,7 +354,7 @@ export default function ProgressScreen() {
               isVeryCompact && styles.statBoxVeryCompact,
             ]}
           >
-            <ThemedText style={[styles.statEmoji]}>✨</ThemedText>
+            <ThemedText style={styles.statEmoji}>✨</ThemedText>
             <ThemedText style={[styles.statValue, { color: accentColor }]}>
               {streakData.totalDays}
             </ThemedText>
@@ -342,7 +363,6 @@ export default function ProgressScreen() {
             </ThemedText>
           </View>
 
-          {/* Total Analyses */}
           <View
             style={[
               styles.statBox,
@@ -350,7 +370,7 @@ export default function ProgressScreen() {
               isVeryCompact && styles.statBoxVeryCompact,
             ]}
           >
-            <ThemedText style={[styles.statEmoji]}>📊</ThemedText>
+            <ThemedText style={styles.statEmoji}>📊</ThemedText>
             <ThemedText style={[styles.statValue, { color: successColor }]}>
               {totalAnalyses}
             </ThemedText>
@@ -360,42 +380,81 @@ export default function ProgressScreen() {
           </View>
         </View>
 
-        {/* Filler Word Improvement */}
         <View style={styles.section}>
           <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            Filler Word Progress
+            Daily Word Challenge
           </ThemedText>
-          <View style={styles.fillerRow}>
-            <View style={styles.fillerCol}>
-              <ThemedText style={[styles.fillerLabel, { color: subText }]}>
-                Current
-              </ThemedText>
-              <ThemedText style={[styles.fillerValue, { color: accentColor }]}>
-                {Math.round(fillerTrend.current)}
-              </ThemedText>
-            </View>
-            <View style={styles.trendDisplay}>
-              <ThemedText
-                style={[styles.trendIcon, { color: getTrendColor() }]}
-              >
-                {getFillerTrendIcon()}
-              </ThemedText>
-              <ThemedText
-                style={[styles.trendPercent, { color: getTrendColor() }]}
-              >
-                {fillerTrend.percentChange > 0 ? "+" : ""}
-                {Math.round(fillerTrend.percentChange)}%
-              </ThemedText>
-            </View>
+          <ThemedText style={[styles.challengeHint, { color: subText }]}>
+            Use these words naturally in your conversations today to earn
+            rewards.
+          </ThemedText>
+          <View style={styles.challengeWordRow}>
+            {dailyWords.map((word) => {
+              const matched = matchedDailyWords.includes(word);
+              return (
+                <View
+                  key={word}
+                  style={[
+                    styles.challengeWordChip,
+                    {
+                      borderColor: matched ? successColor : lockedColor,
+                      backgroundColor: matched
+                        ? isDark
+                          ? "#113024"
+                          : "#dcfce7"
+                        : "transparent",
+                    },
+                  ]}
+                >
+                  <ThemedText
+                    style={[
+                      styles.challengeWordText,
+                      { color: matched ? successColor : textColor },
+                    ]}
+                  >
+                    {word}
+                  </ThemedText>
+                </View>
+              );
+            })}
           </View>
-          {fillerTrend.percentChange < 0 && (
-            <ThemedText style={[styles.feedback, { color: successColor }]}>
-              🎉 Excellent! Fewer fillers than last time!
+          <ThemedText style={[styles.challengeMeta, { color: subText }]}>
+            Progress: {matchedDailyWords.length}/{dailyWords.length} words used
+            · Points: {progress.rewardPoints}
+          </ThemedText>
+
+          <Pressable
+            onPress={claimTodayWordReward}
+            disabled={hasClaimedToday || matchedDailyWords.length === 0}
+            style={({ pressed }) => [
+              styles.challengeClaimBtn,
+              {
+                backgroundColor:
+                  hasClaimedToday || matchedDailyWords.length === 0
+                    ? isDark
+                      ? "#374151"
+                      : "#94a3b8"
+                    : accentColor,
+                opacity: pressed ? 0.85 : 1,
+              },
+            ]}
+          >
+            <ThemedText style={styles.challengeClaimBtnText}>
+              {hasClaimedToday
+                ? "Reward claimed today"
+                : matchedDailyWords.length >= dailyWords.length
+                  ? "Claim 50 points + Wordsmith badge"
+                  : "Claim points for today's used words"}
             </ThemedText>
-          )}
+          </Pressable>
+
+          {hasClaimedToday ? (
+            <ThemedText style={[styles.feedback, { color: successColor }]}>
+              Nice work. Come back tomorrow for a fresh word set.
+            </ThemedText>
+          ) : null}
         </View>
 
-        {/* Recent Activity */}
         <View style={styles.section}>
           <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
             Latest Sessions
@@ -444,13 +503,16 @@ export default function ProgressScreen() {
           )}
         </View>
 
-        {/* Achievements Grid */}
         <View style={styles.section}>
           <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
             🏆 Achievements ({progress.achievements.length}/
             {ACHIEVEMENTS_CONFIG.length})
           </ThemedText>
-          <View style={styles.achievementsGrid}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.achievementsCarouselContent}
+          >
             {ACHIEVEMENTS_CONFIG.map((achievement) => {
               const isUnlocked = getAchievementStatus(achievement.id);
               return (
@@ -460,7 +522,12 @@ export default function ProgressScreen() {
                     styles.achievementCard,
                     isCompact && styles.achievementCardCompact,
                     isVeryCompact && styles.achievementCardVeryCompact,
-                    { opacity: isUnlocked ? 1 : 0.6 },
+                    {
+                      opacity: isUnlocked ? 1 : 0.6,
+                      borderColor: isUnlocked
+                        ? successColor + "55"
+                        : lockedColor + "55",
+                    },
                   ]}
                 >
                   <ThemedText
@@ -493,7 +560,7 @@ export default function ProgressScreen() {
                 </View>
               );
             })}
-          </View>
+          </ScrollView>
         </View>
 
         <View style={styles.spacer} />
@@ -507,23 +574,46 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 40,
   },
 
-  // Header
   header: {
     marginBottom: 24,
+    position: "relative",
+  },
+  kicker: {
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    marginBottom: 6,
   },
   heading: {
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "700",
     marginBottom: 8,
   },
   subheading: {
     fontSize: 15,
   },
+  profileBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderRadius: 9999,
+    width: 34,
+    height: 34,
+  },
+  profileBtnFloating: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    zIndex: 2,
+  },
 
-  // Stats Grid
   statsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -564,63 +654,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
 
-  // Section
   section: {
     marginBottom: 28,
     gap: 12,
-  },
-  optionList: {
-    gap: 10,
-  },
-  optionCard: {
-    borderWidth: 1.5,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    gap: 4,
-  },
-  optionTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  optionDescription: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  ageRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-  },
-  ageButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ageButtonText: {
-    fontSize: 22,
-    fontWeight: "700",
-    lineHeight: 24,
-  },
-  ageValueWrap: {
-    minWidth: 72,
-    alignItems: "center",
-  },
-  ageValue: {
-    fontSize: 32,
-    fontWeight: "700",
-    lineHeight: 38,
-  },
-  ageHint: {
-    fontSize: 12,
-    lineHeight: 16,
-    textAlign: "center",
   },
   sectionTitle: {
     fontSize: 16,
@@ -629,39 +665,43 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
 
-  // Filler Row
-  fillerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-  },
-  fillerCol: {
-    alignItems: "center",
-    gap: 4,
-  },
-  fillerLabel: {
+  challengeHint: {
     fontSize: 13,
-    fontWeight: "500",
     lineHeight: 18,
   },
-  fillerValue: {
-    fontSize: 32,
-    fontWeight: "700",
-    lineHeight: 38,
+  challengeWordRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
-  trendDisplay: {
+  challengeWordChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  challengeWordText: {
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  challengeMeta: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  challengeClaimBtn: {
+    marginTop: 4,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     alignItems: "center",
-    gap: 4,
   },
-  trendIcon: {
-    fontSize: 32,
-    lineHeight: 38,
-  },
-  trendPercent: {
-    fontSize: 16,
+  challengeClaimBtnText: {
+    color: "#ffffff",
+    fontSize: 13,
     fontWeight: "700",
-    lineHeight: 22,
+    lineHeight: 18,
+    textAlign: "center",
   },
   feedback: {
     fontSize: 13,
@@ -670,7 +710,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  // Activity
   emptyState: {
     fontSize: 14,
     lineHeight: 20,
@@ -702,28 +741,26 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
-  // Achievements
-  achievementsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 12,
-    columnGap: 10,
+  achievementsCarouselContent: {
+    paddingRight: 4,
+    gap: 12,
   },
   achievementCard: {
-    width: "48%",
-    alignSelf: "stretch",
+    width: 200,
+    minHeight: 170,
     alignItems: "center",
     justifyContent: "flex-start",
+    borderWidth: 1,
+    borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 14,
     gap: 8,
   },
   achievementCardCompact: {
-    width: "100%",
+    width: 190,
   },
   achievementCardVeryCompact: {
-    width: "100%",
+    width: 180,
   },
   achievementIcon: {
     fontWeight: "700",

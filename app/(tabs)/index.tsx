@@ -9,7 +9,6 @@ import {
     StyleSheet,
     Switch,
     View,
-    useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -20,6 +19,7 @@ import { useAssemblyAiLive } from "../../src/liveFiller/useAssemblyAiLive";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useCoachContext } from "@/context/coach-context";
 import { useTranscript } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -61,8 +61,6 @@ const PRACTICE_CONTEXT_OPTIONS: Array<{
 export default function CoachScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme() ?? "light";
-  const { width } = useWindowDimensions();
-  const isWide = width >= 520;
   const { segments, appendSegment, startNewRecordingSession } = useTranscript();
   const { selectedPracticeContext, setSelectedPracticeContext } =
     useCoachContext();
@@ -98,7 +96,7 @@ export default function CoachScreen() {
 
   const onListeningChange = useCallback(
     async (next: boolean) => {
-      if (Platform.OS !== 'web') {
+      if (Platform.OS !== "web") {
         void Haptics.impactAsync(
           next
             ? Haptics.ImpactFeedbackStyle.Medium
@@ -116,7 +114,7 @@ export default function CoachScreen() {
           stopMicRef.current = await startMicPcmStream(sendPcmChunk);
           setListening(true);
         } catch (err) {
-          console.error('Failed to start listening:', err);
+          console.error("Failed to start listening:", err);
           await stopMicRef.current?.();
           stopMicRef.current = null;
           disconnect();
@@ -155,9 +153,9 @@ export default function CoachScreen() {
   );
 
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState) => {
+    const sub = AppState.addEventListener("change", (nextState) => {
       if (
-        (nextState === 'inactive' || nextState === 'background') &&
+        (nextState === "inactive" || nextState === "background") &&
         listening
       ) {
         void onListeningChange(false);
@@ -184,7 +182,7 @@ export default function CoachScreen() {
   );
 
   const resetMistakes = useCallback(() => {
-    if (Platform.OS !== 'web') {
+    if (Platform.OS !== "web") {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
     setMistakeCount(0);
@@ -192,12 +190,29 @@ export default function CoachScreen() {
 
   const content = (
     <>
-      <View style={styles.hero}>
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => router.push("/(tabs)/profile")}
+          style={({ pressed }) => [
+            styles.profileBtn,
+            styles.profileBtnFloating,
+            {
+              borderColor: accentSoft,
+              backgroundColor:
+                accentSoft + (colorScheme === "dark" ? "55" : "99"),
+              opacity: pressed ? 0.85 : 1,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Open profile"
+        >
+          <IconSymbol size={17} name="person.fill" color={accent} />
+        </Pressable>
         <ThemedText style={[styles.kicker, { color: accent }]}>
-          Live coaching
+          Name of Product
         </ThemedText>
         <ThemedText type="title" style={styles.heroTitle}>
-          Speech habits
+          Live Coaching
         </ThemedText>
         <ThemedText style={[styles.heroSub, { color: muted }]}>
           Turn on listening when you&apos;re ready to practice. Haptic feedback
@@ -211,15 +226,36 @@ export default function CoachScreen() {
             <ThemedText type="defaultSemiBold" style={styles.listeningTitle}>
               Live Coaching
             </ThemedText>
-            <ThemedText type="title" style={styles.heroTitle}>
-              Speech habits
-            </ThemedText>
-            <ThemedText style={[styles.heroSub, { color: muted }]}>
-              Turn on listening when you&apos;re ready to practice. Haptic
-              feedback can flag slips in real time once your speech layer is
-              connected.
+            <ThemedText style={[styles.listeningHint, { color: muted }]}>
+              {listening
+                ? connected
+                  ? "Session in progress"
+                  : "Connecting..."
+                : "Microphone idle"}
             </ThemedText>
           </View>
+          <Switch
+            value={listening}
+            onValueChange={(v) => void onListeningChange(v)}
+            trackColor={{ false: surface2, true: accentSoft }}
+            thumbColor={listening ? accent : "#f4f4f5"}
+            ios_backgroundColor={surface2}
+            accessibilityLabel="Toggle active listening"
+          />
+        </View>
+        {error ? (
+          <ThemedText style={[styles.transcriptHint, { color: "#dc2626" }]}>
+            Live error: {error}
+          </ThemedText>
+        ) : null}
+        <ThemedText style={[styles.transcriptHint, { color: muted }]}>
+          {connecting ? "Connecting to live transcription..." : null}
+          {connecting ? "\n" : ""}
+          {segments.length > 0
+            ? `${segments.length} segment${segments.length === 1 ? "" : "s"} saved · view full transcript on Analytics`
+            : "Saved segments show on the Analytics tab"}
+        </ThemedText>
+      </View>
 
       <ThemedText type="subtitle" style={styles.sectionTitle}>
         What are you practicing right now?
@@ -259,9 +295,29 @@ export default function CoachScreen() {
         })}
       </View>
 
-          <ThemedText
-            type="subtitle"
-            style={[styles.sectionTitle, styles.mistakesSection]}
+      <ThemedText
+        type="subtitle"
+        style={[styles.sectionTitle, styles.mistakesSection]}
+      >
+        Moments flagged
+      </ThemedText>
+      <View style={[styles.mistakeCard, { backgroundColor: surface }]}>
+        <ThemedText style={[styles.mistakeCount, { color: accent }]}>
+          {mistakeCount}
+        </ThemedText>
+        <ThemedText style={[styles.mistakeLabel, { color: muted }]}>
+          {listening
+            ? "Live filler detections this session"
+            : "Start listening to begin a session"}
+        </ThemedText>
+        <View style={styles.mistakeActions}>
+          <Pressable
+            onPress={resetMistakes}
+            style={({ pressed }) => [
+              styles.textBtn,
+              { opacity: pressed ? 0.7 : mistakeCount === 0 ? 0.4 : 1 },
+            ]}
+            disabled={mistakeCount === 0}
           >
             <ThemedText style={[styles.textBtnLabel, { color: tint }]}>
               Reset count
@@ -280,7 +336,6 @@ export default function CoachScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
-          isWide && styles.scrollWide,
           Platform.OS === "web" && styles.scrollWeb,
         ]}
         keyboardShouldPersistTaps="handled"
@@ -300,39 +355,44 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     paddingHorizontal: 20,
   },
-  scrollWide: {
-    maxWidth: 520,
-    width: '100%',
-    alignSelf: 'center',
-  },
   scrollWeb: {
     flexGrow: 1,
-    minHeight: '100%',
+    minHeight: "100%",
   },
   inner: {
     flex: 1,
-    paddingTop: 8,
+    paddingTop: 20,
+    position: "relative",
+  },
+  profileBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderRadius: 9999,
+    width: 34,
+    height: 34,
+  },
+  profileBtnFloating: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    zIndex: 2,
   },
   header: {
     marginBottom: 24,
-  },
-  heading: {
-    marginBottom: 8,
-  },
-  subheading: {
-    fontSize: 15,
-  },
-  hero: {
-    marginBottom: 24,
+    position: "relative",
   },
   kicker: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1.2,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     marginBottom: 6,
   },
   heroTitle: {
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "700",
     marginBottom: 8,
   },
   heroSub: {
@@ -345,9 +405,9 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   listeningRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 16,
   },
   listeningCopy: {

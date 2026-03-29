@@ -37,6 +37,17 @@ export default function SpeechToText() {
 
   return (
     <View style={{ flex: 1, padding: 24, paddingTop: 48, gap: 12 }}>
+      <Text
+        style={{
+          fontSize: 13,
+          fontWeight: "700",
+          letterSpacing: 1.2,
+          textTransform: "uppercase",
+          color: "#0369a1",
+        }}
+      >
+        Name of Product
+      </Text>
       <Button
         title={running ? "Stop speech capture" : "Start speech capture"}
         onPress={running ? stop : start}

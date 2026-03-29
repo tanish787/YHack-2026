@@ -1,4 +1,4 @@
-import React, { createContext, ReactNode, useContext, useState } from 'react';
+import React, { createContext, ReactNode, useContext, useState } from "react";
 
 export interface DailyEntry {
   date: string;
@@ -20,19 +20,29 @@ export interface ProgressData {
   fillerWordHistory: FillerWordEntry[];
   dailyEntries: DailyEntry[];
   achievements: string[];
+  rewardPoints: number;
+  claimedWordRewardDates: string[];
 }
 
 interface ProgressContextType {
   progress: ProgressData;
   recordPractice: (minutes: number) => void;
   recordAnalysis: (fillerCount: number) => void;
-  getFillerWordTrend: () => { current: number; previous: number; percentChange: number };
+  getFillerWordTrend: () => {
+    current: number;
+    previous: number;
+    percentChange: number;
+  };
   getStreakData: () => { current: number; longest: number; totalDays: number };
   addAchievement: (achievement: string) => void;
+  hasClaimedWordReward: (date: string) => boolean;
+  claimWordReward: (date: string, matchedWords: number) => number;
   checkAndUnlockAchievements: () => void;
 }
 
-const ProgressContext = createContext<ProgressContextType | undefined>(undefined);
+const ProgressContext = createContext<ProgressContextType | undefined>(
+  undefined,
+);
 
 const INITIAL_STATE: ProgressData = {
   currentStreak: 0,
@@ -42,17 +52,19 @@ const INITIAL_STATE: ProgressData = {
   fillerWordHistory: [],
   dailyEntries: [],
   achievements: [],
+  rewardPoints: 0,
+  claimedWordRewardDates: [],
 };
 
 function getTodayDateString(): string {
   const today = new Date();
-  return today.toISOString().split('T')[0];
+  return today.toISOString().split("T")[0];
 }
 
 function getYesterdayDateString(): string {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  return yesterday.toISOString().split('T')[0];
+  return yesterday.toISOString().split("T")[0];
 }
 
 function updateStreak(
@@ -61,7 +73,11 @@ function updateStreak(
   currentStreak: number,
   longestStreak: number,
   totalDays: number,
-): { newCurrentStreak: number; newLongestStreak: number; newTotalDays: number } {
+): {
+  newCurrentStreak: number;
+  newLongestStreak: number;
+  newTotalDays: number;
+} {
   let newCurrentStreak = currentStreak;
   let newLongestStreak = longestStreak;
   let newTotalDays = totalDays;
@@ -91,7 +107,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const recordPractice = (minutes: number) => {
     const today = getTodayDateString();
-    
+
     setProgress((prev) => {
       const { newCurrentStreak, newLongestStreak, newTotalDays } = updateStreak(
         today,
@@ -103,7 +119,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
       let dailyEntries = [...prev.dailyEntries];
       const todayEntryIndex = dailyEntries.findIndex((e) => e.date === today);
-      
+
       if (todayEntryIndex >= 0) {
         const existingEntry = dailyEntries[todayEntryIndex];
         dailyEntries = [
@@ -161,7 +177,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         const newAverageFillers =
           existingEntry.analysisCount === 0
             ? fillerCount
-            : (existingEntry.averageFillers * existingEntry.analysisCount + fillerCount) /
+            : (existingEntry.averageFillers * existingEntry.analysisCount +
+                fillerCount) /
               newAnalysisCount;
 
         const updatedEntry: DailyEntry = {
@@ -201,7 +218,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     const current = history[history.length - 1]?.count || 0;
     const previous = history[history.length - 2]?.count || current;
 
-    const percentChange = previous === 0 ? 0 : ((current - previous) / previous) * 100;
+    const percentChange =
+      previous === 0 ? 0 : ((current - previous) / previous) * 100;
 
     return { current, previous, percentChange };
   };
@@ -223,53 +241,99 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const hasClaimedWordReward = (date: string) => {
+    return progress.claimedWordRewardDates.includes(date);
+  };
+
+  const claimWordReward = (date: string, matchedWords: number) => {
+    if (matchedWords <= 0) return 0;
+    if (hasClaimedWordReward(date)) return 0;
+
+    const points = matchedWords >= 3 ? 50 : matchedWords * 10;
+
+    setProgress((prev) => ({
+      ...prev,
+      rewardPoints: prev.rewardPoints + points,
+      claimedWordRewardDates: [...prev.claimedWordRewardDates, date],
+      achievements: prev.achievements.includes("wordsmith_daily")
+        ? prev.achievements
+        : [...prev.achievements, "wordsmith_daily"],
+    }));
+
+    return points;
+  };
+
   const checkAndUnlockAchievements = () => {
-    const totalAnalyses = progress.dailyEntries.reduce((sum, entry) => sum + entry.analysisCount, 0);
+    const totalAnalyses = progress.dailyEntries.reduce(
+      (sum, entry) => sum + entry.analysisCount,
+      0,
+    );
     const fillerTrend = getFillerWordTrend();
 
     // first_step: Complete your first analysis
-    if (totalAnalyses >= 1 && !progress.achievements.includes('first_step')) {
-      addAchievement('first_step');
+    if (totalAnalyses >= 1 && !progress.achievements.includes("first_step")) {
+      addAchievement("first_step");
     }
 
     // week_warrior: Maintain a 7-day streak
-    if (progress.currentStreak >= 7 && !progress.achievements.includes('week_warrior')) {
-      addAchievement('week_warrior');
+    if (
+      progress.currentStreak >= 7 &&
+      !progress.achievements.includes("week_warrior")
+    ) {
+      addAchievement("week_warrior");
     }
 
     // month_master: Maintain a 30-day streak
-    if (progress.currentStreak >= 30 && !progress.achievements.includes('month_master')) {
-      addAchievement('month_master');
+    if (
+      progress.currentStreak >= 30 &&
+      !progress.achievements.includes("month_master")
+    ) {
+      addAchievement("month_master");
     }
 
     // filler_fighter: Reduce filler words by 50%
     if (
       progress.fillerWordHistory.length >= 2 &&
       fillerTrend.percentChange < -50 &&
-      !progress.achievements.includes('filler_fighter')
+      !progress.achievements.includes("filler_fighter")
     ) {
-      addAchievement('filler_fighter');
+      addAchievement("filler_fighter");
     }
 
     // consistency_king: Practice every day for 2 weeks
-    if (progress.currentStreak >= 14 && !progress.achievements.includes('consistency_king')) {
-      addAchievement('consistency_king');
+    if (
+      progress.currentStreak >= 14 &&
+      !progress.achievements.includes("consistency_king")
+    ) {
+      addAchievement("consistency_king");
     }
 
     // perfect_practice: Complete 10 analyses
-    if (totalAnalyses >= 10 && !progress.achievements.includes('perfect_practice')) {
-      addAchievement('perfect_practice');
+    if (
+      totalAnalyses >= 10 &&
+      !progress.achievements.includes("perfect_practice")
+    ) {
+      addAchievement("perfect_practice");
     }
 
     // speed_demon: Complete 5 analyses in one day
-    const todayEntries = progress.dailyEntries.find((e) => e.date === getTodayDateString());
-    if (todayEntries && todayEntries.analysisCount >= 5 && !progress.achievements.includes('speed_demon')) {
-      addAchievement('speed_demon');
+    const todayEntries = progress.dailyEntries.find(
+      (e) => e.date === getTodayDateString(),
+    );
+    if (
+      todayEntries &&
+      todayEntries.analysisCount >= 5 &&
+      !progress.achievements.includes("speed_demon")
+    ) {
+      addAchievement("speed_demon");
     }
 
     // milestone_50: Complete 50 analyses
-    if (totalAnalyses >= 50 && !progress.achievements.includes('milestone_50')) {
-      addAchievement('milestone_50');
+    if (
+      totalAnalyses >= 50 &&
+      !progress.achievements.includes("milestone_50")
+    ) {
+      addAchievement("milestone_50");
     }
   };
 
@@ -282,6 +346,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         getFillerWordTrend,
         getStreakData,
         addAchievement,
+        hasClaimedWordReward,
+        claimWordReward,
         checkAndUnlockAchievements,
       }}
     >
@@ -293,7 +359,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 export function useProgress() {
   const context = useContext(ProgressContext);
   if (!context) {
-    throw new Error('useProgress must be used within a ProgressProvider');
+    throw new Error("useProgress must be used within a ProgressProvider");
   }
   return context;
 }
