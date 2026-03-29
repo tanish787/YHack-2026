@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,18 +20,6 @@ import {
   analyzeSpeechPatterns,
   validateApiConfiguration,
 } from "@/services/llm-service";
-import {
-  loadPersonalBests,
-  mergePersonalBests,
-  resetPersonalBests,
-  savePersonalBests,
-  type PersonalBests,
-} from "@/services/personal-bests";
-import {
-  computeSessionSpeechMetrics,
-  getFillerBucketLabel,
-  type FillerBucket,
-} from "@/services/speech-metrics";
 
 interface AnalysisResult {
   fillers: string[];
@@ -48,36 +36,11 @@ export default function AnalyticsScreen() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [personalBests, setPersonalBests] = useState<PersonalBests | null>(
-    null,
-  );
-  const [pbFlash, setPbFlash] = useState<string[]>([]);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  const sessionMetrics = useMemo(
-    () => computeSessionSpeechMetrics(speechText),
-    [speechText],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    void loadPersonalBests().then((b) => {
-      if (!cancelled) setPersonalBests(b);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (pbFlash.length > 0) setAdvancedOpen(true);
-  }, [pbFlash]);
 
   const bgColor = useThemeColor({}, "background");
   const textColor = useThemeColor({}, "text");
   const muted = useThemeColor({}, "icon");
   const cardBg = colorScheme === "dark" ? "#1c2124" : "#f0f4f8";
-  const hasSavedTranscript = segments.length > 0;
 
   const handleAnalyze = async () => {
     // Validate configuration first
@@ -125,7 +88,6 @@ export default function AnalyticsScreen() {
   const handleClear = () => {
     setAnalysis(null);
     setError(null);
-    setPbFlash([]);
   };
 
   const [clearingTranscript, setClearingTranscript] = useState(false);
@@ -232,19 +194,12 @@ export default function AnalyticsScreen() {
                   styles.linkBtn,
                   clearingTranscript && styles.linkBtnDisabled,
                 ]}
-                style={[
-                  styles.linkBtn,
-                  clearingTranscript && styles.linkBtnDisabled,
-                ]}
                 onPress={() => void handleClearStoredTranscript()}
                 disabled={clearingTranscript}
                 accessibilityRole="button"
                 accessibilityLabel="Clear saved transcript and analysis"
               >
-                accessibilityLabel="Clear saved transcript and analysis"
-              >
                 <Text style={styles.linkBtnText}>
-                  {clearingTranscript ? "Clearing…" : "Clear saved transcript"}
                   {clearingTranscript ? "Clearing…" : "Clear saved transcript"}
                 </Text>
               </Pressable>
@@ -275,276 +230,6 @@ export default function AnalyticsScreen() {
             value={fullTranscript}
             editable={false}
           />
-        </ThemedView>
-
-        <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
-          <Pressable
-            style={styles.advHeader}
-            onPress={() => setAdvancedOpen((o) => !o)}
-            accessibilityRole="button"
-            accessibilityLabel="Advanced analytics"
-            accessibilityState={{ expanded: advancedOpen }}
-          >
-            <View style={styles.advHeaderTextCol}>
-              <Text style={[styles.advTitle, { color: textColor }]}>
-                Advanced analytics
-              </Text>
-              <Text style={[styles.advSubtitle, { color: muted }]}>
-                Filler placement, vocabulary stats, personal bests
-              </Text>
-            </View>
-            <Text
-              style={[styles.advChevron, { color: muted }]}
-              accessibilityElementsHidden
-              importantForAccessibility="no"
-            >
-              {advancedOpen ? "▼" : "▶"}
-            </Text>
-          </Pressable>
-
-          {advancedOpen ? (
-            <View style={styles.advBody}>
-              {!hasSavedTranscript ? (
-                <Text style={[styles.advEmptyText, { color: muted }]}>
-                  To receive Advanced Analytics, usevthe Coach tab, tap{" "}
-                  {"\u201c"}Analyze Speech{"\u201d"}, or {"\u201c"}Save to
-                  transcript{"\u201d"} to build a transcript. Clearing the saved
-                  transcript resets this section and your personal bests.
-                </Text>
-              ) : personalBests === null ? (
-                <View style={styles.advLoadingRow}>
-                  <ActivityIndicator color="#007AFF" />
-                  <Text style={[styles.findingItem, { color: muted }]}>
-                    Loading your records…
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  <Text style={[styles.eduSubhead, { color: textColor }]}>
-                    Personal bests
-                  </Text>
-                  <Text style={[styles.eduHint, { color: muted }]}>
-                    Updated when you run {"\u201c"}Analyze Speech{"\u201d"}.
-                    Lower filler rate is better; other scores, higher is better.
-                  </Text>
-                  <View style={styles.pbGrid}>
-                    <View style={styles.pbRow}>
-                      <Text style={[styles.pbLabel, { color: muted }]}>
-                        Lowest filler rate
-                      </Text>
-                      <Text style={[styles.pbValue, { color: textColor }]}>
-                        {personalBests.bestFillerRatePercent !== null
-                          ? `${personalBests.bestFillerRatePercent.toFixed(1)}% of words`
-                          : "—"}
-                        {pbFlash.includes("filler") ? (
-                          <Text style={styles.pbNew}> · New best</Text>
-                        ) : null}
-                      </Text>
-                    </View>
-                    <View style={styles.pbRow}>
-                      <Text style={[styles.pbLabel, { color: muted }]}>
-                        Most consistent pace
-                      </Text>
-                      <Text style={[styles.pbValue, { color: textColor }]}>
-                        {personalBests.bestPaceConsistencyScore !== null
-                          ? `${personalBests.bestPaceConsistencyScore} / 100`
-                          : "—"}
-                        {pbFlash.includes("pace") ? (
-                          <Text style={styles.pbNew}> · New best</Text>
-                        ) : null}
-                      </Text>
-                    </View>
-                    <View style={styles.pbRow}>
-                      <Text style={[styles.pbLabel, { color: muted }]}>
-                        Longest clean streak
-                      </Text>
-                      <Text style={[styles.pbValue, { color: textColor }]}>
-                        {personalBests.longestCleanStreakWords > 0
-                          ? `${personalBests.longestCleanStreakWords} words without a filler`
-                          : "—"}
-                        {pbFlash.includes("streak") ? (
-                          <Text style={styles.pbNew}> · New best</Text>
-                        ) : null}
-                      </Text>
-                    </View>
-                    <View style={[styles.pbRow, styles.pbRowLast]}>
-                      <Text style={[styles.pbLabel, { color: muted }]}>
-                        Richest vocabulary (sample)
-                      </Text>
-                      <Text style={[styles.pbValue, { color: textColor }]}>
-                        {personalBests.bestTypeTokenRatio !== null
-                          ? `${(personalBests.bestTypeTokenRatio * 100).toFixed(1)}% unique (TTR)`
-                          : "—"}
-                        {pbFlash.includes("vocab") ? (
-                          <Text style={styles.pbNew}> · New best</Text>
-                        ) : null}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.advDivider,
-                      { backgroundColor: muted + "33" },
-                    ]}
-                  />
-
-                  <Text style={[styles.eduSubhead, { color: textColor }]}>
-                    Data-driven coaching (this sample)
-                  </Text>
-                  <Text style={[styles.eduHint, { color: muted }]}>
-                    No AI—same metrics every time for the same text. Matches
-                    common fillers and phrases like {"\u201c"}you know{"\u201d"}
-                    , {"\u201c"}sort of{"\u201d"}.
-                  </Text>
-
-                  {speechText.trim().length === 0 ? (
-                    <Text style={[styles.findingItem, { color: muted }]}>
-                      Paste speech in the box above to see filler placement,
-                      type-token ratio, and this sample’s stats.
-                    </Text>
-                  ) : (
-                    <>
-                      <Text
-                        style={[
-                          styles.eduSubhead,
-                          { color: textColor, marginTop: 4 },
-                        ]}
-                      >
-                        Filler placement
-                      </Text>
-                      {sessionMetrics.fillerHeatmap.totalFillers === 0 ? (
-                        <Text style={[styles.findingItem, { color: muted }]}>
-                          No fillers from our list in this text—or too little to
-                          classify.
-                        </Text>
-                      ) : (
-                        <>
-                          {(
-                            [
-                              "topic_transition",
-                              "after_question",
-                              "sentence_start",
-                              "mid_speech",
-                            ] as FillerBucket[]
-                          ).map((bucket) => {
-                            const n =
-                              sessionMetrics.fillerHeatmap.byBucket[bucket];
-                            const max = Math.max(
-                              1,
-                              ...Object.values(
-                                sessionMetrics.fillerHeatmap.byBucket,
-                              ),
-                            );
-                            const wPct = Math.round((n / max) * 100);
-                            return (
-                              <View key={bucket} style={styles.heatmapRow}>
-                                <View style={styles.heatmapLabelCol}>
-                                  <Text
-                                    style={[
-                                      styles.heatmapLabelText,
-                                      { color: textColor },
-                                    ]}
-                                    numberOfLines={2}
-                                  >
-                                    {getFillerBucketLabel(bucket)}
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.heatmapCount,
-                                      { color: muted },
-                                    ]}
-                                  >
-                                    {n} filler{n === 1 ? "" : "s"}
-                                  </Text>
-                                </View>
-                                <View
-                                  style={[
-                                    styles.heatmapTrack,
-                                    {
-                                      backgroundColor:
-                                        colorScheme === "dark"
-                                          ? "#2b3139"
-                                          : "#e5e7eb",
-                                    },
-                                  ]}
-                                >
-                                  <View
-                                    style={[
-                                      styles.heatmapFill,
-                                      {
-                                        width: `${wPct}%`,
-                                        backgroundColor:
-                                          n > 0 ? "#f97316" : "transparent",
-                                      },
-                                    ]}
-                                  />
-                                </View>
-                              </View>
-                            );
-                          })}
-                          <Text
-                            style={[styles.insightText, { color: textColor }]}
-                          >
-                            {sessionMetrics.fillerHeatmap.insight}
-                          </Text>
-                        </>
-                      )}
-
-                      <Text
-                        style={[
-                          styles.eduSubhead,
-                          { color: textColor, marginTop: 18 },
-                        ]}
-                      >
-                        Vocabulary diversity
-                      </Text>
-                      <Text style={[styles.findingItem, { color: textColor }]}>
-                        Type-token ratio:{" "}
-                        <Text style={{ fontWeight: "700" }}>
-                          {(
-                            sessionMetrics.vocabulary.typeTokenRatio * 100
-                          ).toFixed(1)}
-                          %
-                        </Text>{" "}
-                        unique words ({sessionMetrics.vocabulary.uniqueWords} /{" "}
-                        {sessionMetrics.vocabulary.totalWords} words).
-                      </Text>
-                      <Text
-                        style={[styles.eduHint, { color: muted, marginTop: 6 }]}
-                      >
-                        Higher means less repetition and broader word choice.
-                        Longer samples are more meaningful.
-                      </Text>
-
-                      <Text
-                        style={[
-                          styles.eduSubhead,
-                          { color: textColor, marginTop: 18 },
-                        ]}
-                      >
-                        This sample at a glance
-                      </Text>
-                      <Text style={[styles.findingItem, { color: textColor }]}>
-                        Filler rate:{" "}
-                        {sessionMetrics.fillerRatePercent.toFixed(1)}% of words
-                        · Clean streak: {sessionMetrics.longestCleanStreak}{" "}
-                        words · Pace consistency:{" "}
-                        {sessionMetrics.paceConsistencyScore} / 100
-                      </Text>
-                      <Text
-                        style={[styles.eduHint, { color: muted, marginTop: 6 }]}
-                      >
-                        Pace score uses how similar your sentence lengths are
-                        (from punctuation)—a simple proxy when timing isn’t
-                        available.
-                      </Text>
-                    </>
-                  )}
-                </>
-              )}
-            </View>
-          ) : null}
         </ThemedView>
 
         {/* Action Buttons */}
