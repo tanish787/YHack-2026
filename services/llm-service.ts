@@ -270,7 +270,9 @@ export async function analyzeSpeechPatterns(
 
     const userPrompt = getCustomizedPrompt(speechText, focusId, proficiencyLevel, improvementGoals);
     
-    console.log(`\n💬 User Prompt:\n${userPrompt.substring(0, 200)}...`);
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log(`\n💬 User Prompt:\n${userPrompt.substring(0, 200)}...`);
+    }
 
     const requestBody = {
       model: model,
