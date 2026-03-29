@@ -143,7 +143,10 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       const fillerIndex = fillerHistory.findIndex((e) => e.date === today);
 
       if (fillerIndex >= 0) {
-        fillerHistory[fillerIndex].count = fillerCount;
+        fillerHistory[fillerIndex] = {
+          ...fillerHistory[fillerIndex],
+          count: fillerCount,
+        };
       } else {
         fillerHistory.push({ date: today, count: fillerCount });
       }
