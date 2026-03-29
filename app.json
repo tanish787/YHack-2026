@@ -8,6 +8,11 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "extra": {
+      "k2ThinkV2ApiKey": "${K2_THINK_V2_API_KEY}",
+      "k2ThinkV2ApiEndpoint": "${K2_THINK_V2_API_ENDPOINT}",
+      "k2ThinkV2Model": "${K2_THINK_V2_MODEL}"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.yhack2026",
