@@ -1,24 +1,27 @@
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { useCoachContext } from "@/context/coach-context";
+import { useProfile } from "@/context/profile-context";
+import { useProgress } from "@/context/progress-context";
 import { useTranscript } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
 import {
-  analyzeSpeechPatterns,
-  validateApiConfiguration,
+    analyzeSpeechPatterns,
+    validateApiConfiguration,
 } from "@/services/llm-service";
 
 interface AnalysisResult {
@@ -39,6 +42,9 @@ export default function AnalyticsScreen() {
     clearTranscript,
     ready,
   } = useTranscript();
+  const { selectedFocus } = useCoachContext();
+  const { profile } = useProfile();
+  const { recordAnalysis, recordPractice } = useProgress();
   const [speechText, setSpeechText] = useState("");
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -71,17 +77,44 @@ export default function AnalyticsScreen() {
     setAnalysis(null);
 
     try {
+      console.log('═══════════════════════════════════════════════════════');
+      console.log('📊 ANALYTICS PAGE - INITIATING ANALYSIS');
+      console.log('═══════════════════════════════════════════════════════');
       console.log(
-        "Analytics: Starting analysis with text:",
-        speechText.substring(0, 50) + "...",
+        `📝 Input Text: ${speechText.substring(0, 100)}${speechText.length > 100 ? '...' : ''}`,
       );
-      const result = await analyzeSpeechPatterns(speechText);
+      console.log(`🎯 Selected Focus: ${selectedFocus}`);
+      console.log(`👤 User Proficiency: ${profile.proficiencyLevel}`);
+      console.log(`🎯 Improvement Goals: ${profile.improvementGoals.join(', ')}`);
+      console.log(`📏 Text Length: ${speechText.length} characters`);
+      console.log('───────────────────────────────────────────────────────');
+      
+      const result = await analyzeSpeechPatterns(
+        speechText,
+        selectedFocus,
+        profile.proficiencyLevel,
+        profile.improvementGoals,
+      );
+      
+      console.log('───────────────────────────────────────────────────────');
+      console.log('✅ Analysis Complete - Updating UI');
+      console.log('═══════════════════════════════════════════════════════\n');
+      
       setAnalysis(result);
+      
+      // Record progress tracking
+      const fillerCount = result.fillers.length;
+      recordAnalysis(fillerCount);
+      
+      // Estimate practice time based on text length (rough approximation)
+      const estimatedMinutes = Math.max(1, Math.ceil(speechText.length / 100));
+      recordPractice(estimatedMinutes);
+      
       await appendSegment(speechText.trim(), "analytics");
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error occurred";
-      console.error("Analytics: Error occurred:", errorMessage);
+      console.error("❌ Analytics Error:", errorMessage);
       setError(errorMessage);
       Alert.alert("Analysis Error", errorMessage);
     } finally {
