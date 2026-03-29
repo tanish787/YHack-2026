@@ -2,6 +2,7 @@ import { useAssemblyAiLive } from "@/src/liveFiller/useAssemblyAiLive";
 import * as Haptics from "expo-haptics";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AppState,
   Platform,
   Pressable,
   ScrollView,
@@ -108,6 +109,21 @@ export default function CoachScreen() {
       transcript,
     ],
   );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (
+        (nextState === "inactive" || nextState === "background") &&
+        listening
+      ) {
+        void onListeningChange(false);
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [listening, onListeningChange]);
 
   const selectFocus = useCallback(
     (id: CorrectionFocusId) => {

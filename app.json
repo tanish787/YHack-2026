@@ -11,7 +11,8 @@
     "extra": {
       "k2ThinkV2ApiKey": "${K2_THINK_V2_API_KEY}",
       "k2ThinkV2ApiEndpoint": "${K2_THINK_V2_API_ENDPOINT}",
-      "k2ThinkV2Model": "${K2_THINK_V2_MODEL}"
+      "k2ThinkV2Model": "${K2_THINK_V2_MODEL}",
+      "apiBaseUrl": "http://YOUR_COMPUTER_IP:3001"
     },
     "ios": {
       "supportsTablet": true,
@@ -47,7 +48,7 @@
         {
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone.",
           "enableBackgroundPlayback": true,
-          "enableBackgroundRecording": false
+          "enableBackgroundRecording": true
         }
       ],
       [
@@ -70,9 +71,6 @@
         }
       ]
     ],
-    "extra": {
-      "apiBaseUrl": "http://YOUR_COMPUTER_IP:3001"
-    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

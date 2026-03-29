@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  AppStateStatus,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +22,10 @@ import {
   analyzeSpeechPatterns,
   validateApiConfiguration,
 } from "@/services/llm-service";
+import {
+  transcribeBackgroundRecording,
+  useBackgroundCaptureRecorder,
+} from "@/src/backgroundCapture/recorder";
 
 interface AnalysisResult {
   fillers: string[];
@@ -31,16 +37,100 @@ interface AnalysisResult {
 
 export default function AnalyticsScreen() {
   const colorScheme = useColorScheme() ?? "light";
-  const { fullTranscript, topContentWords, segments, clearTranscript, ready } =
-    useTranscript();
+  const {
+    fullTranscript,
+    topContentWords,
+    segments,
+    appendSegment,
+    clearTranscript,
+    ready,
+  } = useTranscript();
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const {
+    recording: backgroundRecording,
+    start,
+    stop,
+  } = useBackgroundCaptureRecorder();
+  const [processingBackgroundAudio, setProcessingBackgroundAudio] =
+    useState(false);
+  const [backgroundStatus, setBackgroundStatus] = useState<string | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   const bgColor = useThemeColor({}, "background");
   const textColor = useThemeColor({}, "text");
   const muted = useThemeColor({}, "icon");
   const cardBg = colorScheme === "dark" ? "#1c2124" : "#f0f4f8";
+
+  const stopAndTranscribeBackgroundCapture = useCallback(async () => {
+    setProcessingBackgroundAudio(true);
+    setBackgroundStatus("Stopping recording...");
+
+    try {
+      const stopResult = await stop();
+
+      if (!stopResult.uri) {
+        setBackgroundStatus("No recording found to transcribe.");
+        return;
+      }
+
+      setBackgroundStatus("Transcribing recorded audio...");
+      const transcript = await transcribeBackgroundRecording(stopResult.uri);
+      const trimmed = transcript.trim();
+
+      if (!trimmed) {
+        setBackgroundStatus("No speech detected in the background recording.");
+        return;
+      }
+
+      await appendSegment(trimmed, "listening");
+      setBackgroundStatus("Background transcript added.");
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to process background recording.";
+      setBackgroundStatus(message);
+      Alert.alert("Background Capture Error", message);
+    } finally {
+      setProcessingBackgroundAudio(false);
+    }
+  }, [appendSegment, stop]);
+
+  const handleBackgroundCapturePress = useCallback(async () => {
+    if (backgroundRecording) {
+      await stopAndTranscribeBackgroundCapture();
+      return;
+    }
+
+    try {
+      await start();
+      setBackgroundStatus("Recording in background is active.");
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to start background recording.";
+      setBackgroundStatus(message);
+      Alert.alert("Background Capture Error", message);
+    }
+  }, [backgroundRecording, start, stopAndTranscribeBackgroundCapture]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      const wasInBackground = /inactive|background/.test(appStateRef.current);
+      appStateRef.current = nextState;
+
+      if (wasInBackground && nextState === "active" && backgroundRecording) {
+        void stopAndTranscribeBackgroundCapture();
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [backgroundRecording, stopAndTranscribeBackgroundCapture]);
 
   const handleAnalyze = async () => {
     // Validate configuration first
@@ -62,6 +152,11 @@ export default function AnalyticsScreen() {
       );
       return;
     }
+    /* await setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+    }); */
 
     setIsLoading(true);
     setError(null);
@@ -230,6 +325,30 @@ export default function AnalyticsScreen() {
             value={fullTranscript}
             editable={false}
           />
+          <View style={styles.backgroundCaptureSection}>
+            <Pressable
+              style={[
+                styles.backgroundCaptureBtn,
+                backgroundRecording
+                  ? styles.backgroundCaptureStopBtn
+                  : styles.backgroundCaptureStartBtn,
+                processingBackgroundAudio && styles.buttonDisabled,
+              ]}
+              onPress={() => void handleBackgroundCapturePress()}
+              disabled={processingBackgroundAudio}
+            >
+              <Text style={styles.backgroundCaptureBtnText}>
+                {backgroundRecording
+                  ? "Stop Background Capture"
+                  : "Start Background Capture"}
+              </Text>
+            </Pressable>
+            {backgroundStatus ? (
+              <Text style={[styles.backgroundCaptureStatus, { color: muted }]}>
+                {backgroundStatus}
+              </Text>
+            ) : null}
+          </View>
         </ThemedView>
 
         {/* Action Buttons */}
@@ -238,10 +357,10 @@ export default function AnalyticsScreen() {
             style={[
               styles.button,
               styles.analyzeButton,
-              isLoading && styles.buttonDisabled,
+              (isLoading || processingBackgroundAudio) && styles.buttonDisabled,
             ]}
             onPress={handleAnalyze}
-            disabled={isLoading}
+            disabled={isLoading || processingBackgroundAudio}
           >
             {isLoading ? (
               <ActivityIndicator color="#ffffff" />
@@ -396,6 +515,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlignVertical: "top",
     minHeight: 120,
+  },
+  backgroundCaptureSection: {
+    marginTop: 14,
+    gap: 8,
+  },
+  backgroundCaptureBtn: {
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  backgroundCaptureStartBtn: {
+    backgroundColor: "#7c3aed",
+  },
+  backgroundCaptureStopBtn: {
+    backgroundColor: "#b91c1c",
+  },
+  backgroundCaptureBtnText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  backgroundCaptureStatus: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   buttonContainer: {
     flexDirection: "row",
