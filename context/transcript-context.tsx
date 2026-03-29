@@ -211,8 +211,7 @@ export function TranscriptProvider({
       if (snapshot.length > 0) {
         const inferredPracticeContextId = [...snapshot]
           .reverse()
-          .find((segment) => segment.source === "listening")
-          ?.practiceContextId;
+          .find((segment) => segment.source === "listening")?.practiceContextId;
         const transcript = snapshot
           .map((s) => s.text)
           .join("\n\n")
