@@ -1,11 +1,11 @@
 import { K2_CONFIG, validateConfig } from "@/config/k2-config";
 import type {
-  CorrectionFocusId,
-  PracticeContextId,
+    CorrectionFocusId,
+    PracticeContextId,
 } from "@/constants/speech-coach";
 import type {
-  ImprovementGoalId,
-  ProficiencyLevel,
+    ImprovementGoalId,
+    ProficiencyLevel,
 } from "@/constants/user-profile";
 import { IMPROVEMENT_GOALS } from "@/constants/user-profile";
 import { computeSessionSpeechMetrics } from "@/services/speech-metrics";
@@ -27,6 +27,10 @@ const ANALYSIS_REQUEST_TIMEOUT_MS = 120_000;
 const ANALYSIS_MAX_INPUT_CHARS = 18_000;
 const ANALYSIS_MAX_OUTPUT_TOKENS = 1_400;
 const MAX_RETRIES = 2;
+
+/** Nudges “think” models toward less deliberation (prompt-only; no API behavior change). */
+const ANALYSIS_SPEED_PROMPT =
+  "SPEED: Use fast, shallow reasoning only—do not show step-by-step thinking or deliberation. Output the JSON in one shot; keep lists and \"details\" concise.";
 
 function clipTranscriptForAnalysis(text: string): string {
   const t = text.trim();
@@ -388,6 +392,7 @@ Pick a value that matches severity; mediocre and bad speeches must score much lo
 
   const focusPrompts: Record<CorrectionFocusId, string> = {
     fillers: `TASK: Analyze this speech for filler words ONLY.
+${ANALYSIS_SPEED_PROMPT}
 REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
 CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blocks. Start with { and end with }
 
@@ -398,6 +403,7 @@ ${overallScoreGuidance}
 Text: "${speechText}"`,
 
     pacing: `TASK: Analyze this speech for pacing and wordiness ONLY.
+${ANALYSIS_SPEED_PROMPT}
 REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
 CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blocks. Start with { and end with }
 
@@ -408,6 +414,7 @@ ${overallScoreGuidance}
 Text: "${speechText}"`,
 
     hedging: `TASK: Analyze this speech for hedging and vague language ONLY.
+${ANALYSIS_SPEED_PROMPT}
 REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
 CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blocks. Start with { and end with }
 
@@ -418,6 +425,7 @@ ${overallScoreGuidance}
 Text: "${speechText}"`,
 
     repetition: `TASK: Analyze this speech for repetition and redundancy ONLY.
+${ANALYSIS_SPEED_PROMPT}
 REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
 CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blocks. Start with { and end with }
 
@@ -506,7 +514,9 @@ export async function analyzeSpeechPatterns(
 
   const systemPrompt = `You MUST output ONLY valid JSON. No explanations, no preamble, no code blocks, no additional text. Start with { and end with }. If asked to use JSON, respond ONLY with the JSON object itself.
 
-For overall_score: use the full 0-100 range. Reserve the ~20s for genuinely weak, disorganized speech and the ~90s for genuinely strong, polished speech — avoid defaulting to the 50s and 60s.`;
+For overall_score: use the full 0-100 range. Reserve the ~20s for genuinely weak, disorganized speech and the ~90s for genuinely strong, polished speech — avoid defaulting to the 50s and 60s.
+
+${ANALYSIS_SPEED_PROMPT}`;
 
   const userPrompt = getCustomizedPrompt(
     clippedText,
