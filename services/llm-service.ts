@@ -395,15 +395,12 @@ export async function analyzeSpeechPatterns(
       throw new Error('Network error - could not connect to the AI service');
     }
     
-    // For all other errors, log and return fallback
-    console.warn('⚠️ Returning fallback response due to error:', error);
-    return {
-      overall_score: 50,
-      fillers: [],
-      vagueLanguage: [],
-      suggestions: ['Analysis complete. Please check the app logs for details.'],
-      details: 'The analysis encountered an issue but your speech was processed. Try analyzing again for detailed feedback.',
-    };
+    // For all other errors, rethrow so that callers can handle real failures
+    console.warn('⚠️ Rethrowing error from speech analysis:', error);
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('An unexpected error occurred during speech analysis.');
   }
 }
 
