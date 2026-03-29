@@ -1,5 +1,11 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,10 +22,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { PRACTICE_CONTEXT_OPTIONS } from "@/constants/speech-coach";
 import { useCoachContext } from "@/context/coach-context";
 import { useProfile } from "@/context/profile-context";
 import { useProgress } from "@/context/progress-context";
-import { useTranscript } from "@/context/transcript-context";
+import {
+  useTranscript,
+  type TranscriptArchiveSession,
+} from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
 import {
@@ -80,6 +90,12 @@ export default function AnalyticsScreen() {
 
   const recentArchivedSessions = archivedSessions.slice(0, 8);
 
+  const practiceTitleById = useMemo(() => {
+    return new Map(
+      PRACTICE_CONTEXT_OPTIONS.map((item) => [item.id, item.title]),
+    );
+  }, []);
+
   const formatArchiveTime = useCallback((timestamp: number) => {
     try {
       return new Date(timestamp).toLocaleString();
@@ -88,9 +104,21 @@ export default function AnalyticsScreen() {
     }
   }, []);
 
-  const getArchiveReasonLabel = useCallback((reason: "live" | "background") => {
-    return reason === "live" ? "Live Coaching" : "Background Capture";
-  }, []);
+  const getArchiveReasonLabel = useCallback(
+    (session: TranscriptArchiveSession) => {
+      if (session.reason === "background") {
+        return "Background Capture";
+      }
+
+      const practiceTitle = session.practiceContextId
+        ? practiceTitleById.get(session.practiceContextId)
+        : undefined;
+      return practiceTitle
+        ? `${practiceTitle} Practice`
+        : "Presentation Practice";
+    },
+    [practiceTitleById],
+  );
 
   const confirmDeleteArchivedSession = useCallback(
     (sessionId: string) => {
@@ -506,7 +534,7 @@ export default function AnalyticsScreen() {
                           <Text
                             style={[styles.historyReason, { color: textColor }]}
                           >
-                            {getArchiveReasonLabel(session.reason)}
+                            {getArchiveReasonLabel(session)}
                           </Text>
                           <Text style={[styles.historyTime, { color: muted }]}>
                             {formatArchiveTime(session.archivedAt)}

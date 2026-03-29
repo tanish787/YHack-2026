@@ -129,7 +129,9 @@ export default function CoachScreen() {
 
         const chunk = transcript.trim();
         if (chunk) {
-          await appendSegment(chunk, "listening");
+          await appendSegment(chunk, "listening", {
+            practiceContextId: selectedPracticeContext,
+          });
         }
         setListening(false);
 
@@ -146,6 +148,7 @@ export default function CoachScreen() {
       resetTranscript,
       router,
       sendPcmChunk,
+      selectedPracticeContext,
       startNewRecordingSession,
       transcript,
     ],

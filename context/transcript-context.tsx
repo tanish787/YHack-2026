@@ -1,3 +1,4 @@
+import type { PracticeContextId } from "@/constants/speech-coach";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
   createContext,
@@ -22,6 +23,7 @@ export type TranscriptSegment = {
   id: string;
   text: string;
   source: TranscriptSource;
+  practiceContextId?: PracticeContextId;
   createdAt: number;
 };
 
@@ -30,6 +32,7 @@ export type TranscriptArchiveReason = "live" | "background";
 export type TranscriptArchiveSession = {
   id: string;
   reason: TranscriptArchiveReason;
+  practiceContextId?: PracticeContextId;
   archivedAt: number;
   segments: TranscriptSegment[];
   transcript: string;
@@ -43,8 +46,15 @@ type TranscriptContextValue = {
   fullTranscript: string;
   /** Most frequent non–stop words across the full transcript. */
   topContentWords: WordFrequency[];
-  appendSegment: (text: string, source: TranscriptSource) => Promise<void>;
-  startNewRecordingSession: (reason: TranscriptArchiveReason) => Promise<void>;
+  appendSegment: (
+    text: string,
+    source: TranscriptSource,
+    options?: { practiceContextId?: PracticeContextId },
+  ) => Promise<void>;
+  startNewRecordingSession: (
+    reason: TranscriptArchiveReason,
+    options?: { practiceContextId?: PracticeContextId },
+  ) => Promise<void>;
   removeArchivedSession: (sessionId: string) => Promise<void>;
   clearArchivedSessions: () => Promise<void>;
   clearTranscript: () => Promise<void>;
@@ -87,6 +97,11 @@ export function TranscriptProvider({
                   (s.source === "listening" ||
                     s.source === "background" ||
                     s.source === "analytics") &&
+                  (s.practiceContextId === undefined ||
+                    s.practiceContextId === "presentation" ||
+                    s.practiceContextId === "interview" ||
+                    s.practiceContextId === "meeting" ||
+                    s.practiceContextId === "conversation") &&
                   typeof s.createdAt === "number",
               ),
             );
@@ -111,6 +126,11 @@ export function TranscriptProvider({
                       s &&
                       typeof s.id === "string" &&
                       (s.reason === "live" || s.reason === "background") &&
+                      (s.practiceContextId === undefined ||
+                        s.practiceContextId === "presentation" ||
+                        s.practiceContextId === "interview" ||
+                        s.practiceContextId === "meeting" ||
+                        s.practiceContextId === "conversation") &&
                       typeof s.archivedAt === "number" &&
                       Array.isArray(s.segments) &&
                       typeof s.transcript === "string",
@@ -151,19 +171,29 @@ export function TranscriptProvider({
   }, [archivedSessions, ready]);
 
   const appendSegment = useCallback(
-    async (text: string, source: TranscriptSource) => {
+    async (
+      text: string,
+      source: TranscriptSource,
+      options?: { practiceContextId?: PracticeContextId },
+    ) => {
       const trimmed = text.trim();
       if (!trimmed) return;
 
       setSegments((prev) => {
         const last = prev[prev.length - 1];
-        if (last && last.text.trim() === trimmed && last.source === source) {
+        if (
+          last &&
+          last.text.trim() === trimmed &&
+          last.source === source &&
+          last.practiceContextId === options?.practiceContextId
+        ) {
           return prev;
         }
         const segment: TranscriptSegment = {
           id: makeId(),
           text: trimmed,
           source,
+          practiceContextId: options?.practiceContextId,
           createdAt: Date.now(),
         };
         return [...prev, segment];
@@ -173,9 +203,16 @@ export function TranscriptProvider({
   );
 
   const startNewRecordingSession = useCallback(
-    async (reason: TranscriptArchiveReason) => {
+    async (
+      reason: TranscriptArchiveReason,
+      options?: { practiceContextId?: PracticeContextId },
+    ) => {
       const snapshot = segments;
       if (snapshot.length > 0) {
+        const inferredPracticeContextId = [...snapshot]
+          .reverse()
+          .find((segment) => segment.source === "listening")
+          ?.practiceContextId;
         const transcript = snapshot
           .map((s) => s.text)
           .join("\n\n")
@@ -183,6 +220,10 @@ export function TranscriptProvider({
         const archived: TranscriptArchiveSession = {
           id: makeId(),
           reason,
+          practiceContextId:
+            reason === "live"
+              ? (options?.practiceContextId ?? inferredPracticeContextId)
+              : undefined,
           archivedAt: Date.now(),
           segments: snapshot,
           transcript,
