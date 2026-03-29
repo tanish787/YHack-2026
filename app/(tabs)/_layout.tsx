@@ -1,10 +1,10 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
+import { Tabs } from "expo-router";
+import React from "react";
 
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { HapticTab } from "@/components/haptic-tab";
+import { IconSymbol } from "@/components/ui/icon-symbol";
+import { Colors } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
@@ -12,22 +12,49 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
         headerShown: false,
         tabBarButton: HapticTab,
-      }}>
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Coach',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="mic.fill" color={color} />,
+          title: "Coach",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={28} name="mic.fill" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'About',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="info.circle.fill" color={color} />,
+          title: "About",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={28} name="info.circle.fill" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="speech-to-text"
+        options={{
+          title: "Speech to Text",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={28} name="waveform.circle.fill" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="haptic-test"
+        options={{
+          title: "Haptic Test",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol
+              size={28}
+              name="iphone.radiowaves.left.and.right"
+              color={color}
+            />
+          ),
         }}
       />
     </Tabs>
