@@ -1,4 +1,5 @@
 import { K2_CONFIG, validateConfig } from "@/config/k2-config";
+import { computeSessionSpeechMetrics } from "@/services/speech-metrics";
 
 interface SpeechAnalysisResult {
   fillers: string[];
@@ -10,6 +11,49 @@ interface SpeechAnalysisResult {
 
 const REQUEST_TIMEOUT_MS = 45000;
 const MAX_RETRIES = 2;
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
+}
+
+function computeDeterministicQualityScore(text: string): number {
+  const metrics = computeSessionSpeechMetrics(text);
+  const wordCount = metrics.vocabulary.totalWords;
+
+  // Fillers: strong negative signal, capped to avoid over-penalizing long sessions.
+  const fillerPenalty = clamp(metrics.fillerRatePercent * 4, 0, 45);
+  const fillerScore = 100 - fillerPenalty;
+
+  // Vocabulary diversity: map practical range [0.2, 0.55] to [0, 100].
+  const ttr = metrics.vocabulary.typeTokenRatio;
+  const vocabScore = clamp(((ttr - 0.2) / 0.35) * 100, 0, 100);
+
+  // Long clean streak rewards sustained fluent speech.
+  const cleanStreakScore = clamp(
+    (metrics.longestCleanStreak / 30) * 100,
+    0,
+    100,
+  );
+
+  const raw =
+    fillerScore * 0.45 +
+    metrics.paceConsistencyScore * 0.25 +
+    vocabScore * 0.15 +
+    cleanStreakScore * 0.15;
+
+  // Short samples are noisy: blend toward neutral score.
+  const confidence = clamp((wordCount - 20) / 80, 0, 1);
+  const neutral = 60;
+  return Math.round(raw * confidence + neutral * (1 - confidence));
+}
+
+function stabilizeOverallScore(llmScore: number, text: string): number {
+  const deterministicScore = computeDeterministicQualityScore(text);
+
+  // Anchor LLM score to deterministic metrics to reduce run-to-run variance.
+  const blended = deterministicScore * 0.7 + llmScore * 0.3;
+  return Math.round(clamp(blended, 0, 100));
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -173,7 +217,7 @@ Speech to analyze: "${speechText}"`;
         },
       ],
       stream: false,
-      temperature: 0.1,
+      temperature: 0,
       max_tokens: 800,
     };
 
@@ -279,7 +323,14 @@ Speech to analyze: "${speechText}"`;
 
       try {
         const parsed = JSON.parse(jsonString);
-        return coerceAnalysisResult(parsed);
+        const analysis = coerceAnalysisResult(parsed);
+        return {
+          ...analysis,
+          overall_score: stabilizeOverallScore(
+            analysis.overall_score,
+            speechText,
+          ),
+        };
       } catch (parseError) {
         lastError = new Error(
           `Failed to parse analysis JSON: ${

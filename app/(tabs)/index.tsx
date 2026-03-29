@@ -165,7 +165,7 @@ export default function CoachScreen() {
         <View style={styles.listeningRow}>
           <View style={styles.listeningCopy}>
             <ThemedText type="defaultSemiBold" style={styles.listeningTitle}>
-              Active listening
+              Coaching Mode
             </ThemedText>
             <ThemedText style={[styles.listeningHint, { color: muted }]}>
               {listening
