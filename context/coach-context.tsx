@@ -11,6 +11,8 @@ interface CoachContextType {
   setSelectedPracticeContext: React.Dispatch<
     React.SetStateAction<PracticeContextId | null>
   >;
+  customPracticeContextText: string;
+  setCustomPracticeContextText: React.Dispatch<React.SetStateAction<string>>;
 }
 
 const CoachContext = createContext<CoachContextType | undefined>(undefined);
@@ -20,6 +22,8 @@ export function CoachProvider({ children }: { children: React.ReactNode }) {
     useState<CorrectionFocusId>("fillers");
   const [selectedPracticeContext, setSelectedPracticeContext] =
     useState<PracticeContextId | null>(null);
+  const [customPracticeContextText, setCustomPracticeContextText] =
+    useState("");
 
   return (
     <CoachContext.Provider
@@ -28,6 +32,8 @@ export function CoachProvider({ children }: { children: React.ReactNode }) {
         setSelectedFocus,
         selectedPracticeContext,
         setSelectedPracticeContext,
+        customPracticeContextText,
+        setCustomPracticeContextText,
       }}
     >
       {children}

@@ -1,6 +1,6 @@
 import { useAssemblyAiLive } from "@/src/liveFiller/useAssemblyAiLive";
 import { useRef, useState } from "react";
-import { Button, ScrollView, Text, View } from "react-native";
+import { Button, Image, ScrollView, Text, View } from "react-native";
 import { startMicPcmStream } from "../../src/liveFiller/mic";
 
 export default function SpeechToText() {
@@ -36,18 +36,20 @@ export default function SpeechToText() {
   };
 
   return (
-    <View style={{ flex: 1, padding: 24, paddingTop: 48, gap: 12 }}>
-      <Text
+    <View style={{ flex: 1, padding: 24, paddingTop: 12, gap: 12 }}>
+      <Image
+        source={require("../../assets/images/SpeechTree.png")}
         style={{
-          fontSize: 13,
-          fontWeight: "700",
-          letterSpacing: 1.2,
-          textTransform: "uppercase",
-          color: "#0369a1",
+          width: "100%",
+          maxWidth: 940,
+          height: 256,
+          marginBottom: -72,
+          marginTop: -64,
+          alignSelf: "flex-start",
+          marginLeft: -64,
         }}
-      >
-        Name of Product
-      </Text>
+        resizeMode="contain"
+      />
       <Button
         title={running ? "Stop speech capture" : "Start speech capture"}
         onPress={running ? stop : start}

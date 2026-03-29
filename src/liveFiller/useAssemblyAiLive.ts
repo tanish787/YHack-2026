@@ -28,6 +28,80 @@ type TerminationMessage = {
 type AssemblyAIMessage = BeginMessage | TurnMessage | TerminationMessage;
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+const TOKEN_REQUEST_TIMEOUT_MS = 8000;
+const WS_CONNECT_TIMEOUT_MS = 12000;
+
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function getTokenEndpointCandidates(apiBaseUrl: string): string[] {
+  const trimmedBase = trimTrailingSlashes(apiBaseUrl);
+  const candidates = new Set<string>([
+    `${trimmedBase}/assemblyai/token`,
+    `${trimmedBase}/api/assemblyai/token`,
+    `${trimmedBase}/token`,
+  ]);
+
+  try {
+    const parsed = new URL(trimmedBase);
+    const basePath = trimTrailingSlashes(parsed.pathname);
+    const origin = parsed.origin;
+
+    if (basePath) {
+      candidates.add(`${origin}/assemblyai/token`);
+      candidates.add(`${origin}/api/assemblyai/token`);
+    }
+  } catch {
+    // Keep default candidates when API base URL is not URL-parseable.
+  }
+
+  return Array.from(candidates);
+}
+
+async function requestLiveToken(apiBaseUrl: string): Promise<string> {
+  const candidates = getTokenEndpointCandidates(apiBaseUrl);
+  let lastStatus: number | null = null;
+  let lastNetworkError: string | null = null;
+
+  for (const url of candidates) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        TOKEN_REQUEST_TIMEOUT_MS,
+      );
+
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        lastStatus = response.status;
+        continue;
+      }
+
+      const data = (await response.json()) as Partial<TokenResponse>;
+      if (typeof data.token === "string" && data.token.length > 0) {
+        return data.token;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Network error";
+      lastNetworkError = `${url} -> ${message}`;
+    }
+  }
+
+  if (lastStatus !== null) {
+    throw new Error(`Token request failed: ${lastStatus}`);
+  }
+
+  if (lastNetworkError) {
+    throw new Error(
+      `Token request failed: cannot reach API base URL (${lastNetworkError})`,
+    );
+  }
+
+  throw new Error("Token request failed");
+}
 
 function extractNewText(previous: string, current: string) {
   if (!previous) return current;
@@ -263,12 +337,7 @@ export function useAssemblyAiLive() {
     setError(null);
 
     try {
-      const tokenRes = await fetch(`${API_BASE_URL}/assemblyai/token`);
-      if (!tokenRes.ok) {
-        throw new Error(`Token request failed: ${tokenRes.status}`);
-      }
-
-      const { token } = (await tokenRes.json()) as TokenResponse;
+      const token = await requestLiveToken(API_BASE_URL);
 
       const params = new URLSearchParams({
         sample_rate: "16000",
@@ -281,7 +350,18 @@ export function useAssemblyAiLive() {
         `wss://streaming.assemblyai.com/v3/ws?${params.toString()}`,
       );
 
+      const wsTimeout = setTimeout(() => {
+        setConnecting(false);
+        setError("Live socket timeout while connecting");
+        try {
+          ws.close();
+        } catch {
+          // no-op
+        }
+      }, WS_CONNECT_TIMEOUT_MS);
+
       ws.onopen = () => {
+        clearTimeout(wsTimeout);
         setConnected(true);
         setConnecting(false);
       };
@@ -347,10 +427,13 @@ export function useAssemblyAiLive() {
 
       ws.onerror = (evt) => {
         console.error("AssemblyAI websocket error:", evt);
+        clearTimeout(wsTimeout);
+        setConnecting(false);
         setError("WebSocket error");
       };
 
       ws.onclose = () => {
+        clearTimeout(wsTimeout);
         setConnected(false);
         setConnecting(false);
         setSessionId(null);

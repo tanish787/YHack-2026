@@ -1,5 +1,4 @@
 import type { PracticeContextId } from "@/constants/speech-coach";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
   createContext,
   useCallback,
@@ -9,13 +8,16 @@ import React, {
   useState,
 } from "react";
 
+import { useAuth } from "@/context/auth-context";
+import {
+  clearUserSessionHistory,
+  saveUserSessionHistory,
+  subscribeUserSessionHistory,
+} from "@/services/firebase";
 import {
   getTopContentWords,
   type WordFrequency,
 } from "@/services/word-analysis";
-
-const STORAGE_KEY = "@speech_coach/transcript_segments_v1";
-const ARCHIVE_STORAGE_KEY = "@speech_coach/transcript_archive_v1";
 
 export type TranscriptSource = "listening" | "background" | "analytics";
 
@@ -78,6 +80,7 @@ export function TranscriptProvider({
 }: {
   children: React.ReactNode;
 }) {
+  const { user, isAccountUser, loading } = useAuth();
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [archivedSessions, setArchivedSessions] = useState<
     TranscriptArchiveSession[]
@@ -85,97 +88,31 @@ export function TranscriptProvider({
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (cancelled) return;
-        if (!raw) {
-          setSegments([]);
-        } else {
-          const parsed = JSON.parse(raw) as TranscriptSegment[];
-          if (Array.isArray(parsed)) {
-            setSegments(
-              parsed.filter(
-                (s) =>
-                  s &&
-                  typeof s.id === "string" &&
-                  typeof s.text === "string" &&
-                  (s.source === "listening" ||
-                    s.source === "background" ||
-                    s.source === "analytics") &&
-                  (s.practiceContextId === undefined ||
-                    s.practiceContextId === "presentation" ||
-                    s.practiceContextId === "interview" ||
-                    s.practiceContextId === "meeting" ||
-                    s.practiceContextId === "conversation") &&
-                  typeof s.createdAt === "number",
-              ),
-            );
-          } else {
-            setSegments([]);
-          }
-        }
+    if (loading) return;
 
-        try {
-          const archivedRaw = await AsyncStorage.getItem(ARCHIVE_STORAGE_KEY);
-          if (!cancelled) {
-            if (!archivedRaw) {
-              setArchivedSessions([]);
-            } else {
-              const archivedParsed = JSON.parse(
-                archivedRaw,
-              ) as TranscriptArchiveSession[];
-              if (Array.isArray(archivedParsed)) {
-                setArchivedSessions(
-                  archivedParsed.filter(
-                    (s) =>
-                      s &&
-                      typeof s.id === "string" &&
-                      (s.reason === "live" || s.reason === "background") &&
-                      (s.practiceContextId === undefined ||
-                        s.practiceContextId === "presentation" ||
-                        s.practiceContextId === "interview" ||
-                        s.practiceContextId === "meeting" ||
-                        s.practiceContextId === "conversation") &&
-                      typeof s.archivedAt === "number" &&
-                      Array.isArray(s.segments) &&
-                      typeof s.transcript === "string",
-                  ),
-                );
-              } else {
-                setArchivedSessions([]);
-              }
-            }
-          }
-        } catch {
-          if (!cancelled) setArchivedSessions([]);
-        }
-      } catch {
-        setSegments([]);
+    if (!isAccountUser || !user) {
+      setSegments([]);
+      setArchivedSessions([]);
+      setReady(true);
+      return;
+    }
+
+    setReady(false);
+    const unsubscribe = subscribeUserSessionHistory(
+      user.uid,
+      (sessions) => {
+        setArchivedSessions(sessions);
+        setReady(true);
+      },
+      (error) => {
+        console.warn("Session history sync failed:", error);
         setArchivedSessions([]);
-      } finally {
-        if (!cancelled) setReady(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  /** Single writer to disk: avoids races where append’s setItem runs after clear. */
-  useEffect(() => {
-    if (!ready) return;
-    void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(segments));
-  }, [segments, ready]);
-
-  useEffect(() => {
-    if (!ready) return;
-    void AsyncStorage.setItem(
-      ARCHIVE_STORAGE_KEY,
-      JSON.stringify(archivedSessions),
+        setReady(true);
+      },
     );
-  }, [archivedSessions, ready]);
+
+    return unsubscribe;
+  }, [isAccountUser, loading, user]);
 
   const appendSegment = useCallback(
     async (
@@ -258,33 +195,52 @@ export function TranscriptProvider({
           transcript,
         };
 
-        setArchivedSessions((prev) => [archived, ...prev].slice(0, 50));
+        setArchivedSessions((prev) => {
+          const nextSessions = [archived, ...prev].slice(0, 50);
+          if (isAccountUser && user) {
+            void saveUserSessionHistory(user.uid, nextSessions).catch(
+              (error) => {
+                console.warn("Failed to persist session history:", error);
+              },
+            );
+          }
+          return nextSessions;
+        });
       }
 
       setSegments([]);
     },
-    [segments],
+    [isAccountUser, segments, user],
   );
 
-  const removeArchivedSession = useCallback(async (sessionId: string) => {
-    setArchivedSessions((prev) =>
-      prev.filter((session) => session.id !== sessionId),
-    );
-  }, []);
+  const removeArchivedSession = useCallback(
+    async (sessionId: string) => {
+      setArchivedSessions((prev) => {
+        const next = prev.filter((session) => session.id !== sessionId);
+        if (isAccountUser && user) {
+          void saveUserSessionHistory(user.uid, next).catch((error) => {
+            console.warn("Failed to persist session deletion:", error);
+          });
+        }
+        return next;
+      });
+    },
+    [isAccountUser, user],
+  );
 
   const clearArchivedSessions = useCallback(async () => {
     setArchivedSessions([]);
-  }, []);
+    if (isAccountUser && user) {
+      try {
+        await clearUserSessionHistory(user.uid);
+      } catch (error) {
+        console.warn("Failed to clear remote session history:", error);
+      }
+    }
+  }, [isAccountUser, user]);
 
   const clearTranscript = useCallback(async () => {
     setSegments([]);
-    try {
-      await AsyncStorage.removeItem(STORAGE_KEY);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-    } catch (e) {
-      console.warn("clearTranscript: failed to persist", e);
-      throw e;
-    }
   }, []);
 
   const fullTranscript = useMemo(

@@ -1,27 +1,39 @@
-import { useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import {
-  IMPROVEMENT_GOALS,
-  PROFICIENCY_LEVELS,
-  type ImprovementGoalId,
-  type ProficiencyLevel,
+    IMPROVEMENT_GOALS,
+    PROFICIENCY_LEVELS,
+    type ImprovementGoalId,
+    type ProficiencyLevel,
 } from "@/constants/user-profile";
+import { useAuth } from "@/context/auth-context";
 import { useProfile } from "@/context/profile-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
+import { isFirebaseConfigured } from "@/services/firebase";
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const { profile, setProficiencyLevel, setAge, toggleGoal } = useProfile();
+  const { user, isAccountUser, loading, signIn, signOut, signUp } = useAuth();
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const firebaseReady = isFirebaseConfigured();
 
   const textColor = useThemeColor({}, "text");
   const bg = useThemeColor({}, "background");
@@ -54,6 +66,61 @@ export default function ProfileScreen() {
     [toggleGoal],
   );
 
+  const canSubmitAuth = useMemo(
+    () => email.trim().length > 3 && password.length >= 6,
+    [email, password],
+  );
+
+  const canSignUp = useMemo(
+    () => canSubmitAuth && username.trim().length >= 2,
+    [canSubmitAuth, username],
+  );
+
+  const handleSignUp = useCallback(async () => {
+    if (!canSignUp || authBusy) return;
+    setAuthBusy(true);
+    try {
+      await signUp(email.trim(), password, username.trim());
+      Alert.alert("Welcome", "Your account is ready. Progress sync is on.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Sign up failed.";
+      Alert.alert("Sign up failed", message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [authBusy, canSignUp, email, password, signUp, username]);
+
+  const handleSignIn = useCallback(async () => {
+    if (!canSubmitAuth || authBusy) return;
+    setAuthBusy(true);
+    try {
+      await signIn(email.trim(), password, username.trim());
+      Alert.alert("Signed in", "Progress sync is on for this account.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Sign in failed.";
+      Alert.alert("Sign in failed", message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [authBusy, canSubmitAuth, email, password, signIn]);
+
+  const handleSignOut = useCallback(async () => {
+    if (authBusy) return;
+    setAuthBusy(true);
+    try {
+      await signOut();
+      Alert.alert("Signed out", "Data sync is off until you sign in again.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Sign out failed.";
+      Alert.alert("Sign out failed", message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [authBusy, signOut]);
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: bg }]}
@@ -64,15 +131,169 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <ThemedText style={[styles.kicker, { color: accentColor }]}>
-            Name of Product
-          </ThemedText>
+          <Image
+            source={require("../../assets/images/SpeechTree.png")}
+            style={styles.brandLogo}
+            resizeMode="contain"
+          />
           <ThemedText type="title" style={styles.heading}>
             Your Profile
           </ThemedText>
           <ThemedText style={[styles.subheading, { color: subText }]}>
             Customize your speech profile
           </ThemedText>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
+            Account
+          </ThemedText>
+
+          {loading ? (
+            <View style={styles.authLoadingRow}>
+              <ActivityIndicator size="small" color={accentColor} />
+              <ThemedText style={[styles.authStatus, { color: subText }]}>
+                Checking account status...
+              </ThemedText>
+            </View>
+          ) : isAccountUser && user ? (
+            <View style={styles.authCard}>
+              <ThemedText style={[styles.authStatus, { color: textColor }]}>
+                Signed in as {user.email ?? "account user"}
+              </ThemedText>
+              <Pressable
+                onPress={() => void handleSignOut()}
+                style={({ pressed }) => [
+                  styles.authPrimaryButton,
+                  {
+                    backgroundColor: isDark ? "#7f1d1d" : "#fee2e2",
+                    borderColor: isDark ? "#ef4444" : "#fca5a5",
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+                disabled={authBusy}
+              >
+                <ThemedText
+                  style={[
+                    styles.authPrimaryButtonText,
+                    { color: isDark ? "#fecaca" : "#991b1b" },
+                  ]}
+                >
+                  Sign out
+                </ThemedText>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.authCard}>
+              <ThemedText style={[styles.authStatus, { color: subText }]}>
+                Create an account to save progress and session history in the
+                cloud.
+              </ThemedText>
+              {!firebaseReady ? (
+                <ThemedText style={[styles.authWarning, { color: "#ef4444" }]}>
+                  Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* values
+                  in your env before signing up.
+                </ThemedText>
+              ) : null}
+
+              <TextInput
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="Username"
+                placeholderTextColor={subText}
+                style={[
+                  styles.authInput,
+                  {
+                    color: textColor,
+                    borderColor: lockedColor,
+                    backgroundColor: isDark ? "#111827" : "#ffffff",
+                  },
+                ]}
+              />
+
+              <ThemedText style={[styles.authHint, { color: subText }]}>
+                Username is required for sign up. On sign in, it is optional.
+              </ThemedText>
+
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                placeholder="Email"
+                placeholderTextColor={subText}
+                style={[
+                  styles.authInput,
+                  {
+                    color: textColor,
+                    borderColor: lockedColor,
+                    backgroundColor: isDark ? "#111827" : "#ffffff",
+                  },
+                ]}
+              />
+
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                placeholder="Password (6+ characters)"
+                placeholderTextColor={subText}
+                style={[
+                  styles.authInput,
+                  {
+                    color: textColor,
+                    borderColor: lockedColor,
+                    backgroundColor: isDark ? "#111827" : "#ffffff",
+                  },
+                ]}
+              />
+
+              <View style={styles.authButtonRow}>
+                <Pressable
+                  onPress={() => void handleSignUp()}
+                  disabled={authBusy || !canSignUp || !firebaseReady}
+                  style={({ pressed }) => [
+                    styles.authPrimaryButton,
+                    {
+                      backgroundColor: accentColor,
+                      borderColor: accentColor,
+                      opacity: pressed || authBusy || !canSignUp ? 0.75 : 1,
+                    },
+                  ]}
+                >
+                  <ThemedText style={styles.authPrimaryButtonText}>
+                    Sign up
+                  </ThemedText>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => void handleSignIn()}
+                  disabled={authBusy || !canSubmitAuth || !firebaseReady}
+                  style={({ pressed }) => [
+                    styles.authSecondaryButton,
+                    {
+                      borderColor: accentColor,
+                      opacity: pressed || authBusy || !canSubmitAuth ? 0.75 : 1,
+                    },
+                  ]}
+                >
+                  <ThemedText
+                    style={[
+                      styles.authSecondaryButtonText,
+                      { color: accentColor },
+                    ]}
+                  >
+                    Sign in
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -204,8 +425,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingTop: 12,
     paddingBottom: 40,
   },
   header: {
@@ -217,6 +438,15 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: "uppercase",
     marginBottom: 6,
+  },
+  brandLogo: {
+    width: "100%",
+    maxWidth: 940,
+    height: 256,
+    marginBottom: -72,
+    marginTop: -64,
+    alignSelf: "flex-start",
+    marginLeft: -64,
   },
   heading: {
     fontSize: 34,
@@ -231,6 +461,63 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 28,
     gap: 12,
+  },
+  authCard: {
+    gap: 10,
+  },
+  authStatus: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  authWarning: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  authHint: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  authLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  authInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  authButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  authPrimaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  authPrimaryButtonText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  authSecondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  authSecondaryButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
   },
   sectionTitle: {
     fontSize: 16,

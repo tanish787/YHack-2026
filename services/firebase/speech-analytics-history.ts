@@ -1,4 +1,3 @@
-import { signInAnonymously } from 'firebase/auth';
 import {
   addDoc,
   collection,
@@ -8,11 +7,11 @@ import {
   query,
   serverTimestamp,
   type Timestamp,
-} from 'firebase/firestore';
+} from "firebase/firestore";
 
-import type { CorrectionFocusId } from '@/constants/speech-coach';
+import type { CorrectionFocusId } from "@/constants/speech-coach";
 
-import { getFirebaseAuth, getFirebaseDb, isFirebaseConfigured } from './client';
+import { getFirebaseAuth, getFirebaseDb, isFirebaseConfigured } from "./client";
 
 const DETAILS_MAX_LEN = 1200;
 
@@ -51,17 +50,17 @@ export type SaveSpeechAnalysisInput = {
 function historyCollection(uid: string) {
   const db = getFirebaseDb();
   if (!db) {
-    throw new Error('Firestore is not initialized');
+    throw new Error("Firestore is not initialized");
   }
-  return collection(db, 'users', uid, 'analyticsHistory');
+  return collection(db, "users", uid, "analyticsHistory");
 }
 
 function timestampToMs(value: unknown): number {
   if (
     value &&
-    typeof value === 'object' &&
-    'toMillis' in value &&
-    typeof (value as Timestamp).toMillis === 'function'
+    typeof value === "object" &&
+    "toMillis" in value &&
+    typeof (value as Timestamp).toMillis === "function"
   ) {
     return (value as Timestamp).toMillis();
   }
@@ -69,16 +68,16 @@ function timestampToMs(value: unknown): number {
 }
 
 function asCorrectionFocusId(raw: unknown): CorrectionFocusId {
-  const id = typeof raw === 'string' ? raw : '';
+  const id = typeof raw === "string" ? raw : "";
   if (
-    id === 'fillers' ||
-    id === 'pacing' ||
-    id === 'hedging' ||
-    id === 'repetition'
+    id === "fillers" ||
+    id === "pacing" ||
+    id === "hedging" ||
+    id === "repetition"
   ) {
     return id;
   }
-  return 'fillers';
+  return "fillers";
 }
 
 /**
@@ -90,12 +89,11 @@ export async function ensureAnonymousFirebaseUser(): Promise<string | null> {
   const auth = getFirebaseAuth();
   if (!auth) return null;
 
-  if (auth.currentUser) {
+  if (auth.currentUser && !auth.currentUser.isAnonymous) {
     return auth.currentUser.uid;
   }
 
-  const credential = await signInAnonymously(auth);
-  return credential.user.uid;
+  return null;
 }
 
 /**
@@ -135,7 +133,7 @@ export async function saveSpeechAnalysisHistory(
 }
 
 /**
- * Live-updates saved analysis rows for the current anonymous user (newest first).
+ * Live-updates saved analysis rows for the current signed-in account user (newest first).
  */
 export function subscribeSpeechAnalysisHistory(
   onUpdate: (rows: SpeechAnalyticsHistoryRecord[]) => void,
@@ -160,7 +158,7 @@ export function subscribeSpeechAnalysisHistory(
 
       const q = query(
         historyCollection(uid),
-        orderBy('createdAt', 'desc'),
+        orderBy("createdAt", "desc"),
         limit(maxRows),
       );
 
@@ -174,26 +172,26 @@ export function subscribeSpeechAnalysisHistory(
               id: doc.id,
               createdAtMs: timestampToMs(d.createdAt),
               overallScore:
-                typeof d.overallScore === 'number' ? d.overallScore : 0,
-              details: typeof d.details === 'string' ? d.details : '',
+                typeof d.overallScore === "number" ? d.overallScore : 0,
+              details: typeof d.details === "string" ? d.details : "",
               fillerCount:
-                typeof d.fillerCount === 'number' ? d.fillerCount : 0,
-              vagueCount: typeof d.vagueCount === 'number' ? d.vagueCount : 0,
+                typeof d.fillerCount === "number" ? d.fillerCount : 0,
+              vagueCount: typeof d.vagueCount === "number" ? d.vagueCount : 0,
               suggestionsCount:
-                typeof d.suggestionsCount === 'number' ? d.suggestionsCount : 0,
+                typeof d.suggestionsCount === "number" ? d.suggestionsCount : 0,
               vaguenessScore:
-                typeof d.vaguenessScore === 'number' ? d.vaguenessScore : 0,
+                typeof d.vaguenessScore === "number" ? d.vaguenessScore : 0,
               correctionFocusId: asCorrectionFocusId(d.correctionFocusId),
               fillerRatePercent:
-                typeof d.fillerRatePercent === 'number'
+                typeof d.fillerRatePercent === "number"
                   ? d.fillerRatePercent
                   : 0,
               totalWordCount:
-                typeof d.totalWordCount === 'number' ? d.totalWordCount : 0,
+                typeof d.totalWordCount === "number" ? d.totalWordCount : 0,
               wordsPerMinute:
-                typeof wpm === 'number' && Number.isFinite(wpm) ? wpm : null,
+                typeof wpm === "number" && Number.isFinite(wpm) ? wpm : null,
               repetitionRatePercent:
-                typeof d.repetitionRatePercent === 'number'
+                typeof d.repetitionRatePercent === "number"
                   ? d.repetitionRatePercent
                   : 0,
             };

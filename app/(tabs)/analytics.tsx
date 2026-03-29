@@ -9,6 +9,7 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -68,7 +69,8 @@ export default function AnalyticsScreen() {
   } = useTranscript();
   const router = useRouter();
   const params = useLocalSearchParams<{ autorun?: string; trigger?: string }>();
-  const { selectedFocus, selectedPracticeContext } = useCoachContext();
+  const { selectedFocus, selectedPracticeContext, customPracticeContextText } =
+    useCoachContext();
   const { profile } = useProfile();
   const { recordAnalysis, recordPractice } = useProgress();
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -159,7 +161,7 @@ export default function AnalyticsScreen() {
       const practiceTitle = session.practiceContextId
         ? practiceTitleById.get(session.practiceContextId)
         : undefined;
-      return practiceTitle ? `${practiceTitle} Practice` : "Live Coaching";
+      return practiceTitle ? `${practiceTitle} Practice` : "Coaching";
     },
     [practiceTitleById],
   );
@@ -256,17 +258,24 @@ export default function AnalyticsScreen() {
         console.log("───────────────────────────────────────────────────────");
       }
 
+      const shouldIncludePracticeContext =
+        runTrigger === "live" ||
+        runTrigger === "background" ||
+        (runTrigger === "manual" &&
+          transcriptToAnalyze === listeningTranscript &&
+          listeningTranscript.length > 0);
+
       const result = await analyzeSpeechPatterns(
         transcriptToAnalyze,
         selectedFocus,
         profile.proficiencyLevel,
         profile.improvementGoals,
         profile.age,
-        runTrigger === "live" ||
-          (runTrigger === "manual" &&
-            transcriptToAnalyze === listeningTranscript &&
-            listeningTranscript.length > 0)
+        shouldIncludePracticeContext
           ? (selectedPracticeContext ?? undefined)
+          : undefined,
+        shouldIncludePracticeContext
+          ? customPracticeContextText.trim() || undefined
           : undefined,
       );
 
@@ -373,11 +382,13 @@ export default function AnalyticsScreen() {
             accessibilityRole="button"
             accessibilityLabel="Open profile"
           >
-            <IconSymbol size={17} name="person.fill" color={accent} />
+            <IconSymbol size={26} name="person.fill" color={accent} />
           </Pressable>
-          <ThemedText style={[styles.kicker, { color: accent }]}>
-            Name of Product
-          </ThemedText>
+          <Image
+            source={require("../../assets/images/SpeechTree.png")}
+            style={styles.brandLogo}
+            resizeMode="contain"
+          />
           <ThemedText type="title" style={styles.headerTitle}>
             Speech Analytics
           </ThemedText>
@@ -553,8 +564,7 @@ export default function AnalyticsScreen() {
               ) : null}
             </View>
             <Text style={[styles.transcriptMeta, { color: muted }]}>
-              Previous transcripts are archived locally when a new recording
-              starts.
+              Session history syncs to your account when you are signed in.
             </Text>
 
             {recentArchivedSessions.length === 0 ? (
@@ -748,7 +758,9 @@ export default function AnalyticsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 20,
   },
   header: {
     marginBottom: 24,
@@ -761,6 +773,15 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 6,
   },
+  brandLogo: {
+    width: "100%",
+    maxWidth: 940,
+    height: 256,
+    marginBottom: -72,
+    marginTop: -64,
+    alignSelf: "flex-start",
+    marginLeft: -64,
+  },
   headerTitle: {
     fontSize: 34,
     lineHeight: 40,
@@ -771,13 +792,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderRadius: 9999,
-    width: 34,
-    height: 34,
+    width: 51,
+    height: 51,
   },
   profileBtnFloating: {
     position: "absolute",
     top: 0,
-    right: 0,
+    right: 16,
     zIndex: 2,
   },
   subtitle: {

@@ -1,3 +1,16 @@
+export {
+  clearUserSessionHistory,
+  getFriendPublicProfileByEmail,
+  respondToFriendRequest,
+  saveUserAccountProfile,
+  saveUserProgress,
+  saveUserSessionHistory,
+  sendFriendRequestByEmail,
+  subscribeUserFriends,
+  subscribeUserProgress,
+  subscribeUserSessionHistory,
+  type FriendPublicProfile
+} from "./account-data";
 export { getFirebaseAuth, getFirebaseDb, isFirebaseConfigured } from "./client";
 export {
   ensureAnonymousFirebaseUser,

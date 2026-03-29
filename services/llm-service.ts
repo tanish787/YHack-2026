@@ -311,6 +311,7 @@ function getCustomizedPrompt(
   improvementGoals?: ImprovementGoalId[],
   age?: number,
   practiceContext?: PracticeContextId,
+  customPracticeContextText?: string,
 ): string {
   const baseFormat = `{"fillers":["um (2)","like (1)"],"vagueLanguage":["kind of","sort of"],"suggestions":["Reduce filler words","Be more specific"],"overall_score":65,"details":"Speech has some fillers and vague language but is generally clear."}`;
 
@@ -338,10 +339,18 @@ function getCustomizedPrompt(
     ? `Current Practice Scenario: ${getPracticeContextDescription(practiceContext)}\n`
     : "";
 
+  const customPracticeContext = customPracticeContextText?.trim()
+    ? `Custom Practice Scenario: ${customPracticeContextText.trim()}\n`
+    : "";
+
   // Context instruction
   const contextInstruction =
-    proficiencyContext || goalsContext || ageContext || practiceContextText
-      ? `\nCONTEXT:\n${proficiencyContext}${goalsContext}${ageContext}${practiceContextText}\nTailor your feedback considering their proficiency level, goals, age, and current practice scenario. Be encouraging and constructive.\n`
+    proficiencyContext ||
+    goalsContext ||
+    ageContext ||
+    practiceContextText ||
+    customPracticeContext
+      ? `\nCONTEXT:\n${proficiencyContext}${goalsContext}${ageContext}${practiceContextText}${customPracticeContext}\nTailor your feedback considering their proficiency level, goals, age, and current practice scenario. Be encouraging and constructive.\n`
       : "";
 
   const focusPrompts: Record<CorrectionFocusId, string> = {
@@ -431,6 +440,7 @@ export async function analyzeSpeechPatterns(
   improvementGoals?: ImprovementGoalId[],
   age?: number,
   practiceContext?: PracticeContextId,
+  customPracticeContextText?: string,
 ): Promise<SpeechAnalysisResult> {
   if (!speechText || speechText.trim().length === 0) {
     throw new Error("Please provide some speech text to analyze");
@@ -462,6 +472,7 @@ export async function analyzeSpeechPatterns(
     improvementGoals,
     age,
     practiceContext,
+    customPracticeContextText,
   );
 
   if (typeof __DEV__ !== "undefined" && __DEV__) {
@@ -686,97 +697,179 @@ export async function generateDailyWordChallengeWords(
       ? improvementGoals.join(", ")
       : "not specified";
 
-  const prompt = `Generate exactly 3 practical English words for a speaking practice challenge.
-Return ONLY valid JSON in this exact format: {"words":["word1","word2","word3"]}
-Rules:
-- single words only (no spaces)
+  const prompt = `Generate exactly 3 practical English vocabulary words for a speaking challenge.
+Output requirements (STRICT):
+- Return ONE single-line JSON object only.
+- Exact key name: words
+- Exact shape: {"words":["word1","word2","word3"]}
+- No markdown, no code fences, no explanations, no extra keys.
+Word rules:
+- 1 token per word (no spaces)
+- letters only a-z (no punctuation, digits, accents, or hyphens)
 - lowercase
-- avoid slang
-- useful in everyday speaking, presentations, meetings, and interviews
-- each word should be distinct and moderately advanced
+- 3 to 16 characters
+- avoid slang and profanity
+- all 3 words must be distinct and useful in professional speaking
 Context:
 - Proficiency: ${proficiencyLevel ?? "intermediate"}
 - Goals: ${goalsText}
-- Age: ${typeof age === "number" ? Math.round(age) : "not specified"}`;
+- Age: ${typeof age === "number" ? Math.round(age) : "not specified"}
+Example valid output:
+{"words":["clarify","cohesive","credible"]}`;
+
+  const normalizeWords = (values: string[]): string[] =>
+    Array.from(
+      new Set(
+        values
+          .map((value) => value.toLowerCase().trim())
+          .flatMap((value) => value.split(/[^a-z]+/g))
+          .map((value) => value.replace(/[^a-z]/g, ""))
+          .filter((value) => /^[a-z]{3,16}$/.test(value))
+          .filter(
+            (value) =>
+              !new Set([
+                "json",
+                "words",
+                "word",
+                "return",
+                "valid",
+                "output",
+                "single",
+                "line",
+              ]).has(value),
+          ),
+      ),
+    ).slice(0, 3);
+
+  const extractWordsFromParsed = (parsed: unknown): string[] => {
+    if (!parsed || typeof parsed !== "object") {
+      return [];
+    }
+
+    const data = parsed as Record<string, unknown>;
+
+    const directCandidates = [
+      data.words,
+      data.challenge_words,
+      data.daily_words,
+      data.vocabulary,
+    ];
+
+    for (const candidate of directCandidates) {
+      if (Array.isArray(candidate)) {
+        const normalized = normalizeWords(
+          candidate.filter((w): w is string => typeof w === "string"),
+        );
+        if (normalized.length >= 3) {
+          return normalized;
+        }
+      }
+    }
+
+    const objectStringValues = Object.values(data)
+      .filter((value): value is string => typeof value === "string")
+      .slice(0, 10);
+    return normalizeWords(objectStringValues);
+  };
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a strict JSON generator. Output only valid JSON and no extra text.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        stream: false,
-        temperature: 0.2,
-        max_tokens: 180,
-      }),
-      signal: controller.signal,
-    });
+    let lastError: Error | null = null;
 
-    const responseText = await response.text();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a strict JSON generator. Output only valid JSON and no extra text.",
+            },
+            {
+              role: "user",
+              content:
+                prompt +
+                (attempt > 0
+                  ? '\n\nIMPORTANT: Previous answer was invalid. Respond with ONLY {"words":["...","...","..."]}.'
+                  : ""),
+            },
+          ],
+          stream: false,
+          temperature: attempt === 0 ? 0.2 : 0,
+          max_tokens: 180,
+        }),
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      throw new Error(
-        `Daily words API error ${response.status}: ${responseText}`,
-      );
-    }
+      const responseText = await response.text();
 
-    const data = JSON.parse(responseText) as {
-      choices?: Array<{
-        message?: { content?: string | Array<{ text?: string }> };
-      }>;
-    };
+      if (!response.ok) {
+        lastError = new Error(
+          `Daily words API error ${response.status}: ${responseText}`,
+        );
+        continue;
+      }
 
-    const rawContent = data.choices?.[0]?.message?.content;
-    const content =
-      typeof rawContent === "string"
-        ? rawContent
-        : Array.isArray(rawContent)
+      const data = JSON.parse(responseText) as {
+        choices?: Array<{
+          message?: { content?: string | Array<{ text?: string }> };
+        }>;
+      };
+
+      const rawContent = data.choices?.[0]?.message?.content;
+      const content =
+        typeof rawContent === "string"
           ? rawContent
-              .map((part) => (typeof part?.text === "string" ? part.text : ""))
-              .join("")
-          : "";
+          : Array.isArray(rawContent)
+            ? rawContent
+                .map((part) =>
+                  typeof part?.text === "string" ? part.text : "",
+                )
+                .join("")
+            : "";
 
-    if (!content.trim()) {
-      throw new Error("Daily words response was empty");
+      if (!content.trim()) {
+        lastError = new Error("Daily words response was empty");
+        continue;
+      }
+
+      const contentWithoutThink = content
+        .replace(/<think>[\s\S]*?<\/think>/gi, "")
+        .trim();
+      const jsonString =
+        extractFirstJsonObject(contentWithoutThink) ||
+        extractFirstJsonObject(content.trim());
+
+      if (!jsonString) {
+        const fallbackFromRawText = normalizeWords([contentWithoutThink]);
+        if (fallbackFromRawText.length >= 3) {
+          return fallbackFromRawText;
+        }
+
+        lastError = new Error("Could not extract JSON for daily words");
+        continue;
+      }
+
+      const parsed = JSON.parse(jsonString) as unknown;
+      const uniqueWords = extractWordsFromParsed(parsed);
+      if (uniqueWords.length < 3) {
+        lastError = new Error("Model did not return 3 valid challenge words");
+        continue;
+      }
+
+      return uniqueWords;
     }
 
-    const jsonString = extractFirstJsonObject(content.trim());
-    if (!jsonString) {
-      throw new Error("Could not extract JSON for daily words");
-    }
-
-    const parsed = JSON.parse(jsonString) as { words?: unknown };
-    const words = Array.isArray(parsed.words)
-      ? parsed.words
-          .filter((w): w is string => typeof w === "string")
-          .map((w) => w.toLowerCase().trim())
-          .filter((w) => /^[a-z]{3,20}$/.test(w))
-      : [];
-
-    const uniqueWords = Array.from(new Set(words)).slice(0, 3);
-    if (uniqueWords.length < 3) {
-      throw new Error("Model did not return 3 valid challenge words");
-    }
-
-    return uniqueWords;
+    throw lastError ?? new Error("Model did not return daily words");
   } finally {
     clearTimeout(timeoutId);
   }

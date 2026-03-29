@@ -1,4 +1,14 @@
-import React, { createContext, ReactNode, useContext, useState } from "react";
+import React, {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useState
+} from "react";
+
+import { useAuth } from "@/context/auth-context";
+import { saveUserProgress, subscribeUserProgress } from "@/services/firebase";
 
 export interface DailyEntry {
   date: string;
@@ -26,6 +36,7 @@ export interface ProgressData {
 
 interface ProgressContextType {
   progress: ProgressData;
+  ready: boolean;
   recordPractice: (minutes: number) => void;
   recordAnalysis: (fillerCount: number) => void;
   getFillerWordTrend: () => {
@@ -103,9 +114,49 @@ function updateStreak(
 }
 
 export function ProgressProvider({ children }: { children: ReactNode }) {
+  const { user, isAccountUser, loading } = useAuth();
   const [progress, setProgress] = useState<ProgressData>(INITIAL_STATE);
+  const [ready, setReady] = useState(false);
+
+  const persistProgress = useCallback(
+    (nextProgress: ProgressData) => {
+      if (!isAccountUser || !user) return;
+      void saveUserProgress(user.uid, nextProgress).catch((error) => {
+        console.warn("Failed to persist progress:", error);
+      });
+    },
+    [isAccountUser, user],
+  );
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (!isAccountUser || !user) {
+      setProgress(INITIAL_STATE);
+      setReady(true);
+      return;
+    }
+
+    setReady(false);
+    const unsubscribe = subscribeUserProgress(
+      user.uid,
+      (next) => {
+        setProgress(next);
+        setReady(true);
+      },
+      (error) => {
+        console.warn("Progress sync failed:", error);
+        setProgress(INITIAL_STATE);
+        setReady(true);
+      },
+    );
+
+    return unsubscribe;
+  }, [isAccountUser, loading, user]);
 
   const recordPractice = (minutes: number) => {
+    if (!isAccountUser || !user) return;
+
     const today = getTodayDateString();
 
     setProgress((prev) => {
@@ -139,7 +190,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      return {
+      const next = {
         ...prev,
         currentStreak: newCurrentStreak,
         longestStreak: newLongestStreak,
@@ -147,10 +198,15 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         totalPracticeDays: newTotalDays,
         dailyEntries,
       };
+
+      persistProgress(next);
+      return next;
     });
   };
 
   const recordAnalysis = (fillerCount: number) => {
+    if (!isAccountUser || !user) return;
+
     const today = getTodayDateString();
 
     setProgress((prev) => {
@@ -201,11 +257,14 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      return {
+      const next = {
         ...prev,
         fillerWordHistory: fillerHistory,
         dailyEntries,
       };
+
+      persistProgress(next);
+      return next;
     });
   };
 
@@ -233,12 +292,19 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   };
 
   const addAchievement = (achievement: string) => {
-    if (!progress.achievements.includes(achievement)) {
-      setProgress((prev) => ({
+    if (!isAccountUser || !user) return;
+
+    setProgress((prev) => {
+      if (prev.achievements.includes(achievement)) {
+        return prev;
+      }
+      const next = {
         ...prev,
         achievements: [...prev.achievements, achievement],
-      }));
-    }
+      };
+      persistProgress(next);
+      return next;
+    });
   };
 
   const hasClaimedWordReward = (date: string) => {
@@ -246,19 +312,24 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   };
 
   const claimWordReward = (date: string, matchedWords: number) => {
+    if (!isAccountUser || !user) return 0;
     if (matchedWords <= 0) return 0;
     if (hasClaimedWordReward(date)) return 0;
 
     const points = matchedWords >= 3 ? 50 : matchedWords * 10;
 
-    setProgress((prev) => ({
-      ...prev,
-      rewardPoints: prev.rewardPoints + points,
-      claimedWordRewardDates: [...prev.claimedWordRewardDates, date],
-      achievements: prev.achievements.includes("wordsmith_daily")
-        ? prev.achievements
-        : [...prev.achievements, "wordsmith_daily"],
-    }));
+    setProgress((prev) => {
+      const next = {
+        ...prev,
+        rewardPoints: prev.rewardPoints + points,
+        claimedWordRewardDates: [...prev.claimedWordRewardDates, date],
+        achievements: prev.achievements.includes("wordsmith_daily")
+          ? prev.achievements
+          : [...prev.achievements, "wordsmith_daily"],
+      };
+      persistProgress(next);
+      return next;
+    });
 
     return points;
   };
@@ -341,6 +412,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     <ProgressContext.Provider
       value={{
         progress,
+        ready,
         recordPractice,
         recordAnalysis,
         getFillerWordTrend,

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
@@ -144,9 +144,11 @@ export default function HistoryScreen() {
         contentContainerStyle={styles.contentBottom}
       >
         <View style={styles.header}>
-          <ThemedText style={[styles.kicker, { color: tint }]}>
-            Name of Product
-          </ThemedText>
+          <Image
+            source={require("../../assets/images/SpeechTree.png")}
+            style={styles.brandLogo}
+            resizeMode="contain"
+          />
           <ThemedText type="title">Session history</ThemedText>
           <ThemedText style={[styles.subtitle, { color: muted }]}>
             Metrics saved when you run Analyze Speech (no transcript in the
@@ -334,11 +336,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentBottom: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 12,
     paddingBottom: 40,
   },
   header: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   kicker: {
     fontSize: 13,
@@ -346,6 +349,15 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: "uppercase",
     marginBottom: 6,
+  },
+  brandLogo: {
+    width: "100%",
+    maxWidth: 940,
+    height: 256,
+    marginBottom: -72,
+    marginTop: -64,
+    alignSelf: "flex-start",
+    marginLeft: -64,
   },
   subtitle: {
     marginTop: 8,

@@ -1,9 +1,11 @@
-import { Tabs } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
 import React from "react";
+import { Alert } from "react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
+import { useAuth } from "@/context/auth-context";
 import { CoachProvider } from "@/context/coach-context";
 import { ProfileProvider } from "@/context/profile-context";
 import { ProgressProvider } from "@/context/progress-context";
@@ -11,6 +13,8 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const router = useRouter();
+  const { isAccountUser, loading } = useAuth();
 
   return (
     <ProfileProvider>
@@ -49,6 +53,26 @@ export default function TabLayout() {
             />
             <Tabs.Screen
               name="progress"
+              listeners={{
+                tabPress: (event) => {
+                  if (loading || isAccountUser) return;
+
+                  event.preventDefault();
+                  Alert.alert(
+                    "Create an account",
+                    "Sign up to save your progress and compare with your friends.",
+                    [
+                      { text: "Not now", style: "cancel" },
+                      {
+                        text: "Sign up",
+                        onPress: () => {
+                          router.push("/(tabs)/profile");
+                        },
+                      },
+                    ],
+                  );
+                },
+              }}
               options={{
                 title: "Progress",
                 tabBarIcon: ({ color }) => (
@@ -65,9 +89,9 @@ export default function TabLayout() {
             <Tabs.Screen
               name="explore"
               options={{
-                title: "About",
+                title: "Friends",
                 tabBarIcon: ({ color }) => (
-                  <IconSymbol size={28} name="info.circle.fill" color={color} />
+                  <IconSymbol size={28} name="person.2.fill" color={color} />
                 ),
               }}
             />

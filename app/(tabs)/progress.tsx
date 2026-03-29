@@ -3,6 +3,8 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     Alert,
+    Image,
+    type ImageSourcePropType,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -13,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { useAuth } from "@/context/auth-context";
 import { useProfile } from "@/context/profile-context";
 import { useProgress } from "@/context/progress-context";
 import { useTranscript } from "@/context/transcript-context";
@@ -24,59 +27,65 @@ import {
 } from "@/services/llm-service";
 
 const ACHIEVEMENTS_CONFIG = [
+  // Replace each source with your final per-achievement image file.
   {
     id: "first_step",
     label: "First Step",
     description: "Complete your first analysis",
-    icon: "🎯",
+    imageSource:
+      require("../../assets/images/FirstStep.png") as ImageSourcePropType,
   },
   {
     id: "week_warrior",
     label: "Week Warrior",
     description: "Maintain a 7-day streak",
-    icon: "⚡",
+    imageSource:
+      require("../../assets/images/WeekWarrior.png") as ImageSourcePropType,
   },
   {
     id: "month_master",
     label: "Month Master",
     description: "Maintain a 30-day streak",
-    icon: "🔥",
+    imageSource:
+      require("../../assets/images/MonthMaster.png") as ImageSourcePropType,
   },
   {
     id: "filler_fighter",
     label: "Filler Fighter",
     description: "Reduce filler words by 50%",
-    icon: "🎖️",
+    imageSource:
+      require("../../assets/images/FillerFighter.png") as ImageSourcePropType,
   },
   {
     id: "consistency_king",
     label: "Consistency King",
     description: "Practice every day for 2 weeks",
-    icon: "👑",
+    imageSource: require("../../assets/images/icon.png") as ImageSourcePropType,
   },
   {
     id: "perfect_practice",
     label: "Perfect Practice",
     description: "Complete 10 analyses",
-    icon: "✨",
+    imageSource: require("../../assets/images/icon.png") as ImageSourcePropType,
   },
   {
     id: "speed_demon",
     label: "Speed Demon",
     description: "Complete 5 analyses in one day",
-    icon: "🚀",
+    imageSource:
+      require("../../assets/images/SpeedDemon.png") as ImageSourcePropType,
   },
   {
     id: "milestone_50",
     label: "Golden Milestone",
     description: "Complete 50 analyses",
-    icon: "🏆",
+    imageSource: require("../../assets/images/icon.png") as ImageSourcePropType,
   },
   {
     id: "wordsmith_daily",
     label: "Wordsmith",
     description: "Complete your daily word challenge",
-    icon: "📚",
+    imageSource: require("../../assets/images/icon.png") as ImageSourcePropType,
   },
 ];
 
@@ -147,6 +156,7 @@ function getFallbackDailyWords(dateKey: string, count = 3): string[] {
 
 export default function ProgressScreen() {
   const router = useRouter();
+  const { isAccountUser, loading: authLoading } = useAuth();
   const colorScheme = useColorScheme() ?? "light";
   const { profile } = useProfile();
   const { fullTranscript, archivedSessions } = useTranscript();
@@ -182,6 +192,26 @@ export default function ProgressScreen() {
   const [validatingDailyWords, setValidatingDailyWords] = useState(false);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (isAccountUser) return;
+
+    Alert.alert(
+      "Create an account",
+      "Sign up to save your progress and compare with your friends.",
+      [
+        {
+          text: "Go to profile",
+          onPress: () => {
+            router.replace("/(tabs)/profile");
+          },
+        },
+      ],
+    );
+  }, [authLoading, isAccountUser, router]);
+
+  useEffect(() => {
+    if (!isAccountUser) return;
+
     let cancelled = false;
     const storageKey = `${DAILY_WORDS_STORAGE_PREFIX}${todayKey}`;
 
@@ -226,6 +256,7 @@ export default function ProgressScreen() {
       cancelled = true;
     };
   }, [
+    isAccountUser,
     todayKey,
     profile.proficiencyLevel,
     profile.improvementGoals,
@@ -250,6 +281,11 @@ export default function ProgressScreen() {
   }, [dailyWords, todaysTranscriptText]);
 
   useEffect(() => {
+    if (!isAccountUser) {
+      setMatchedDailyWords([]);
+      return;
+    }
+
     let cancelled = false;
 
     const validateUsage = async () => {
@@ -329,7 +365,13 @@ export default function ProgressScreen() {
     return () => {
       cancelled = true;
     };
-  }, [dailyWords, todayKey, todaysTranscriptText, tokenMatchedDailyWords]);
+  }, [
+    dailyWords,
+    isAccountUser,
+    todayKey,
+    todaysTranscriptText,
+    tokenMatchedDailyWords,
+  ]);
 
   const hasClaimedToday = hasClaimedWordReward(todayKey);
   const shouldShowClaimButton = matchedDailyWords.length > 0 || hasClaimedToday;
@@ -394,11 +436,13 @@ export default function ProgressScreen() {
             accessibilityRole="button"
             accessibilityLabel="Open profile"
           >
-            <IconSymbol size={17} name="person.fill" color={accentColor} />
+            <IconSymbol size={26} name="person.fill" color={accentColor} />
           </Pressable>
-          <ThemedText style={[styles.kicker, { color: accentColor }]}>
-            Name of Product
-          </ThemedText>
+          <Image
+            source={require("../../assets/images/SpeechTree.png")}
+            style={styles.brandLogo}
+            resizeMode="contain"
+          />
           <ThemedText type="title" style={styles.heading}>
             Your Progress
           </ThemedText>
@@ -506,7 +550,11 @@ export default function ProgressScreen() {
             accessibilityRole="button"
             accessibilityLabel="Show longest streak"
           >
-            <ThemedText style={styles.statEmoji}>🔥</ThemedText>
+            <Image
+              source={ACHIEVEMENTS_CONFIG[2].imageSource}
+              style={styles.statIconImage}
+              resizeMode="contain"
+            />
             <ThemedText style={[styles.statValue, { color: accentColor }]}>
               {streakData.current}
             </ThemedText>
@@ -522,7 +570,11 @@ export default function ProgressScreen() {
               isVeryCompact && styles.statBoxVeryCompact,
             ]}
           >
-            <ThemedText style={styles.statEmoji}>✨</ThemedText>
+            <Image
+              source={ACHIEVEMENTS_CONFIG[5].imageSource}
+              style={styles.statIconImage}
+              resizeMode="contain"
+            />
             <ThemedText style={[styles.statValue, { color: accentColor }]}>
               {streakData.totalDays}
             </ThemedText>
@@ -534,7 +586,7 @@ export default function ProgressScreen() {
 
         <View style={styles.section}>
           <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            🏆 Achievements ({progress.achievements.length}/
+            Achievements ({progress.achievements.length}/
             {ACHIEVEMENTS_CONFIG.length})
           </ThemedText>
           <ScrollView
@@ -559,17 +611,34 @@ export default function ProgressScreen() {
                     },
                   ]}
                 >
-                  <ThemedText
+                  <View
                     style={[
-                      styles.achievementIcon,
+                      styles.achievementIconWrap,
                       {
-                        fontSize: isUnlocked ? 40 : 32,
-                        lineHeight: isUnlocked ? 48 : 40,
+                        borderColor: isUnlocked
+                          ? successColor + "66"
+                          : lockedColor + "55",
+                        backgroundColor: isUnlocked
+                          ? isDark
+                            ? "#052e16"
+                            : "#ecfdf5"
+                          : isDark
+                            ? "#111827"
+                            : "#f8fafc",
                       },
                     ]}
                   >
-                    {achievement.icon}
-                  </ThemedText>
+                    <Image
+                      source={achievement.imageSource}
+                      style={[
+                        styles.achievementIconImage,
+                        {
+                          opacity: isUnlocked ? 1 : 0.65,
+                        },
+                      ]}
+                      resizeMode="contain"
+                    />
+                  </View>
                   <ThemedText
                     style={[
                       styles.achievementName,
@@ -604,7 +673,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 12,
     paddingBottom: 40,
   },
 
@@ -628,18 +697,27 @@ const styles = StyleSheet.create({
   subheading: {
     fontSize: 15,
   },
+  brandLogo: {
+    width: "100%",
+    maxWidth: 940,
+    height: 256,
+    marginBottom: -72,
+    marginTop: -64,
+    alignSelf: "flex-start",
+    marginLeft: -64,
+  },
   profileBtn: {
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderRadius: 9999,
-    width: 34,
-    height: 34,
+    width: 51,
+    height: 51,
   },
   profileBtnFloating: {
     position: "absolute",
     top: 0,
-    right: 0,
+    right: 16,
     zIndex: 2,
   },
 
@@ -666,9 +744,9 @@ const styles = StyleSheet.create({
   statBoxVeryCompact: {
     width: "100%",
   },
-  statEmoji: {
-    fontSize: 28,
-    lineHeight: 34,
+  statIconImage: {
+    width: 30,
+    height: 30,
   },
   statValue: {
     fontSize: 28,
@@ -795,10 +873,18 @@ const styles = StyleSheet.create({
   achievementCardVeryCompact: {
     width: 180,
   },
-  achievementIcon: {
-    fontWeight: "700",
-    paddingTop: 2,
-    paddingBottom: 2,
+  achievementIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 10,
+  },
+  achievementIconImage: {
+    width: "100%",
+    height: "100%",
   },
   achievementName: {
     fontSize: 13,
