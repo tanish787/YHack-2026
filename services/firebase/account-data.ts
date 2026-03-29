@@ -63,6 +63,22 @@ const EMPTY_PROGRESS: ProgressData = {
   claimedWordRewardDates: [],
 };
 
+/** When Firestore has no account doc / email index yet — still show a friend card for demos. */
+function buildMinimalFriendProfile(
+  normalizedEmail: string,
+  displayUid: string,
+): FriendPublicProfile {
+  const local = normalizedEmail.includes("@")
+    ? normalizedEmail.split("@")[0]!
+    : normalizedEmail;
+  return {
+    uid: displayUid,
+    email: normalizedEmail,
+    username: local || normalizedEmail,
+    progress: { ...EMPTY_PROGRESS },
+  };
+}
+
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -120,6 +136,36 @@ function friendLinkDocRef(pairId: string) {
   return doc(db, "friendLinks", pairId);
 }
 
+/** Sets `recipientUid` on accepted links so the requester can open the friend profile by uid. */
+async function backfillRecipientUidOnAcceptedLinks(
+  uid: string,
+  normalizedEmail: string,
+): Promise<void> {
+  if (!normalizedEmail || !isFirebaseConfigured()) return;
+
+  try {
+    const q = query(
+      friendLinksCollection(),
+      where("recipientEmail", "==", normalizedEmail),
+    );
+    const snap = await getDocs(q);
+    await Promise.all(
+      snap.docs.map((d) => {
+        const data = d.data() as { status?: unknown; recipientUid?: unknown };
+        if (data.status !== "accepted") {
+          return Promise.resolve();
+        }
+        if (typeof data.recipientUid === "string" && data.recipientUid) {
+          return Promise.resolve();
+        }
+        return setDoc(d.ref, { recipientUid: uid }, { merge: true });
+      }),
+    );
+  } catch {
+    // non-fatal — profile save should still succeed
+  }
+}
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -133,6 +179,8 @@ function makePairId(a: string, b: string): string {
 export type FriendItem = {
   pairId: string;
   email: string;
+  /** Other user’s Firebase uid when known (avoids email-only lookup). */
+  uid?: string;
   updatedAtMs: number;
 };
 
@@ -381,6 +429,8 @@ export async function saveUserAccountProfile(
     },
     { merge: true },
   );
+
+  await backfillRecipientUidOnAcceptedLinks(uid, normalizedEmail);
 }
 
 export function subscribeUserFriends(
@@ -428,9 +478,21 @@ export function subscribeUserFriends(
           : requesterEmail;
       if (!otherEmail) return;
 
+      const recipientUid =
+        typeof data.recipientUid === "string" ? data.recipientUid : "";
+      let friendUid: string | undefined;
+      if (status === "accepted") {
+        if (normalizedUserEmail === requesterEmail) {
+          friendUid = recipientUid || undefined;
+        } else {
+          friendUid = requestedByUid || undefined;
+        }
+      }
+
       const item: FriendItem = {
         pairId,
         email: otherEmail,
+        uid: friendUid,
         updatedAtMs,
       };
 
@@ -628,10 +690,111 @@ export async function respondToFriendRequest(
     {
       status: accept ? "accepted" : "rejected",
       respondedByUid: uid,
+      ...(accept ? { recipientUid: uid } : {}),
       updatedAt: new Date().toISOString(),
     },
     { merge: true },
   );
+}
+
+export async function getFriendPublicProfileByUid(
+  uid: string,
+  fallbackEmail?: string,
+): Promise<FriendPublicProfile | null> {
+  if (!isFirebaseConfigured()) {
+    return null;
+  }
+
+  const trimmed = uid.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const accountSnap = await getDoc(accountDocRef(trimmed));
+  if (!accountSnap.exists()) {
+    const progressSnap = await getDoc(progressDocRef(trimmed));
+    if (progressSnap.exists()) {
+      const fe = fallbackEmail ? normalizeEmail(fallbackEmail) : "";
+      return {
+        uid: trimmed,
+        email: fe,
+        username: fe.includes("@")
+          ? fe.split("@")[0]!
+          : trimmed.slice(0, 8),
+        progress: normalizeProgress(progressSnap.data()),
+      };
+    }
+    if (fallbackEmail) {
+      return buildMinimalFriendProfile(
+        normalizeEmail(fallbackEmail),
+        trimmed,
+      );
+    }
+    return null;
+  }
+
+  const accountData = accountSnap.data() as Partial<AccountProfileDoc>;
+  const normalizedEmail =
+    typeof accountData.email === "string" && accountData.email
+      ? normalizeEmail(accountData.email)
+      : fallbackEmail
+        ? normalizeEmail(fallbackEmail)
+        : "";
+
+  const progressSnap = await getDoc(progressDocRef(trimmed));
+  const progress = progressSnap.exists()
+    ? normalizeProgress(progressSnap.data())
+    : { ...EMPTY_PROGRESS };
+
+  const username =
+    typeof accountData.username === "string" && accountData.username.trim()
+      ? accountData.username.trim()
+      : normalizedEmail || trimmed;
+
+  return {
+    uid: trimmed,
+    email: normalizedEmail,
+    username,
+    progress,
+  };
+}
+
+/**
+ * Loads friend profile from Firestore, or returns a minimal placeholder so the UI
+ * never dead-ends when account/email index data is missing (e.g. anonymous users).
+ */
+export async function resolveFriendPublicProfile(params: {
+  email: string;
+  uid?: string;
+}): Promise<FriendPublicProfile> {
+  const normalizedEmail = normalizeEmail(params.email);
+  if (!normalizedEmail) {
+    throw new Error("Missing friend email.");
+  }
+
+  const uid = params.uid?.trim();
+
+  if (!isFirebaseConfigured() || !getFirebaseDb()) {
+    return buildMinimalFriendProfile(normalizedEmail, uid || normalizedEmail);
+  }
+
+  try {
+    if (uid) {
+      const byUid = await getFriendPublicProfileByUid(uid, normalizedEmail);
+      if (byUid) {
+        return byUid;
+      }
+    }
+
+    const byEmail = await getFriendPublicProfileByEmail(normalizedEmail);
+    if (byEmail) {
+      return byEmail;
+    }
+  } catch {
+    // Network / Firestore errors — still show placeholder below
+  }
+
+  return buildMinimalFriendProfile(normalizedEmail, uid || normalizedEmail);
 }
 
 export async function getFriendPublicProfileByEmail(
@@ -651,8 +814,9 @@ export async function getFriendPublicProfileByEmail(
     return null;
   }
 
+  // users/{uid}/appData/account — only account docs store `email`.
   const accountQ = query(
-    collectionGroup(db, "account"),
+    collectionGroup(db, "appData"),
     where("email", "==", normalizedEmail),
     limit(1),
   );

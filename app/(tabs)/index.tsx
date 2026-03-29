@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
     Alert,
     AppState,
-    AppStateStatus,
     Image,
     Platform,
     Pressable,
@@ -79,7 +78,6 @@ export default function CoachScreen() {
   const [listening, setListening] = useState(false);
   const [mistakeCount, setMistakeCount] = useState(0);
   const stopMicRef = useRef<StopMicStream | null>(null);
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const {
     recording: backgroundRecording,
     start: startBackgroundCapture,
@@ -252,6 +250,9 @@ export default function CoachScreen() {
     }
   }, [appendSegment, router, selectedPracticeContext, stopBackgroundCapture]);
 
+  // Do not stop background recording when the app returns to the foreground — recording
+  // should continue until the user turns the switch off (otherwise "background mode" feels broken).
+
   const onBackgroundRecordingChange = useCallback(
     async (next: boolean) => {
       if (Platform.OS !== "web") {
@@ -307,21 +308,6 @@ export default function CoachScreen() {
       transcript,
     ],
   );
-
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (nextState) => {
-      const wasInBackground = /inactive|background/.test(appStateRef.current);
-      appStateRef.current = nextState;
-
-      if (wasInBackground && nextState === "active" && backgroundRecording) {
-        void stopAndTranscribeBackgroundCapture();
-      }
-    });
-
-    return () => {
-      sub.remove();
-    };
-  }, [backgroundRecording, stopAndTranscribeBackgroundCapture]);
 
   const content = (
     <>

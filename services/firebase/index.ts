@@ -1,6 +1,8 @@
 export {
   clearUserSessionHistory,
   getFriendPublicProfileByEmail,
+  getFriendPublicProfileByUid,
+  resolveFriendPublicProfile,
   respondToFriendRequest,
   saveUserAccountProfile,
   saveUserProgress,

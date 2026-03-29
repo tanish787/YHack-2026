@@ -261,7 +261,10 @@ export default function FriendsScreen() {
                   onPress={() =>
                     router.push({
                       pathname: "/friend/[email]",
-                      params: { email: item.email },
+                      params: {
+                        email: item.email,
+                        ...(item.uid ? { uid: item.uid } : {}),
+                      },
                     })
                   }
                   accessibilityRole="button"

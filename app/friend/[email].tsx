@@ -14,9 +14,27 @@ import { ThemedView } from "@/components/themed-view";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
 import {
-  getFriendPublicProfileByEmail,
+  resolveFriendPublicProfile,
   type FriendPublicProfile,
 } from "@/services/firebase";
+
+/** Expo Router may pass a string or string[] for the same param. */
+function asRouteParam(value: string | string[] | undefined): string {
+  if (value === undefined) return "";
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : "";
+  return value;
+}
+
+function normalizeEmailParam(raw: string | undefined): string {
+  if (typeof raw !== "string") return "";
+  let s = raw.trim();
+  try {
+    s = decodeURIComponent(s);
+  } catch {
+    // ignore malformed percent-encoding
+  }
+  return s.toLowerCase();
+}
 
 const ACHIEVEMENT_LABELS: Record<string, string> = {
   first_step: "First Step",
@@ -36,7 +54,9 @@ function toAchievementLabel(id: string): string {
 
 export default function FriendProfileScreen() {
   const router = useRouter();
-  const { email } = useLocalSearchParams<{ email?: string }>();
+  const raw = useLocalSearchParams<{ email?: string | string[]; uid?: string | string[] }>();
+  const email = asRouteParam(raw.email);
+  const uid = asRouteParam(raw.uid);
   const colorScheme = useColorScheme() ?? "light";
   const bg = useThemeColor({}, "background");
   const text = useThemeColor({}, "text");
@@ -49,10 +69,9 @@ export default function FriendProfileScreen() {
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<FriendPublicProfile | null>(null);
 
-  const normalizedEmail = useMemo(
-    () => (typeof email === "string" ? email.trim().toLowerCase() : ""),
-    [email],
-  );
+  const normalizedEmail = useMemo(() => normalizeEmailParam(email), [email]);
+
+  const friendUid = useMemo(() => uid.trim(), [uid]);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,14 +87,11 @@ export default function FriendProfileScreen() {
       setError(null);
 
       try {
-        const result = await getFriendPublicProfileByEmail(normalizedEmail);
+        const result = await resolveFriendPublicProfile({
+          email: normalizedEmail,
+          uid: friendUid || undefined,
+        });
         if (cancelled) return;
-
-        if (!result) {
-          setError("Could not find this friend profile.");
-          setProfile(null);
-          return;
-        }
 
         setProfile(result);
       } catch (err) {
@@ -95,7 +111,7 @@ export default function FriendProfileScreen() {
     return () => {
       cancelled = true;
     };
-  }, [normalizedEmail]);
+  }, [normalizedEmail, friendUid]);
 
   return (
     <SafeAreaView

@@ -26,8 +26,16 @@ import {
     validateDailyWordChallengeUsage,
 } from "@/services/llm-service";
 
+const PROGRESS_ASSETS = {
+  speechTree: require("../../assets/images/SpeechTree.png") as ImageSourcePropType,
+  dailyStreak: require("../../assets/images/DailyStreak.png") as ImageSourcePropType,
+  daysPracticed:
+    require("../../assets/images/DaysPracticed.png") as ImageSourcePropType,
+  dailyWordHero:
+    require("../../assets/images/WordSmith.png") as ImageSourcePropType,
+} as const;
+
 const ACHIEVEMENTS_CONFIG = [
-  // Replace each source with your final per-achievement image file.
   {
     id: "first_step",
     label: "First Step",
@@ -60,13 +68,15 @@ const ACHIEVEMENTS_CONFIG = [
     id: "consistency_king",
     label: "Consistency King",
     description: "Practice every day for 2 weeks",
-    imageSource: require("../../assets/images/icon.png") as ImageSourcePropType,
+    imageSource:
+      require("../../assets/images/DailyStreak.png") as ImageSourcePropType,
   },
   {
     id: "perfect_practice",
     label: "Perfect Practice",
     description: "Complete 10 analyses",
-    imageSource: require("../../assets/images/icon.png") as ImageSourcePropType,
+    imageSource:
+      require("../../assets/images/DaysPracticed.png") as ImageSourcePropType,
   },
   {
     id: "speed_demon",
@@ -79,13 +89,16 @@ const ACHIEVEMENTS_CONFIG = [
     id: "milestone_50",
     label: "Golden Milestone",
     description: "Complete 50 analyses",
-    imageSource: require("../../assets/images/icon.png") as ImageSourcePropType,
+    imageSource: require(
+      "../../assets/images/VerbalVictory(GoldenMilestone).png",
+    ) as ImageSourcePropType,
   },
   {
     id: "wordsmith_daily",
     label: "Wordsmith",
     description: "Complete your daily word challenge",
-    imageSource: require("../../assets/images/icon.png") as ImageSourcePropType,
+    imageSource:
+      require("../../assets/images/WordSmith.png") as ImageSourcePropType,
   },
 ];
 
@@ -163,6 +176,7 @@ export default function ProgressScreen() {
   const { width } = useWindowDimensions();
   const isCompact = width < 390;
   const isVeryCompact = width < 350;
+  const statHeroImageSize = Math.min(148, (width - 40 - 10) / 2 - 10);
 
   const {
     progress,
@@ -439,7 +453,7 @@ export default function ProgressScreen() {
             <IconSymbol size={26} name="person.fill" color={accentColor} />
           </Pressable>
           <Image
-            source={require("../../assets/images/SpeechTree.png")}
+            source={PROGRESS_ASSETS.speechTree}
             style={styles.brandLogo}
             resizeMode="contain"
           />
@@ -452,13 +466,25 @@ export default function ProgressScreen() {
         </View>
 
         <View style={styles.section}>
-          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            Daily Word Challenge
-          </ThemedText>
-          <ThemedText style={[styles.challengeHint, { color: subText }]}>
-            Use these words naturally in your conversations today to earn
-            rewards.
-          </ThemedText>
+          <View style={styles.sectionTitleRow}>
+            <Image
+              source={PROGRESS_ASSETS.dailyWordHero}
+              style={styles.sectionTitleImage}
+              resizeMode="contain"
+            />
+            <View style={styles.sectionTitleTextCol}>
+              <ThemedText
+                type="defaultSemiBold"
+                style={[styles.sectionTitle, styles.sectionTitleInRow]}
+              >
+                Daily Word Challenge
+              </ThemedText>
+              <ThemedText style={[styles.challengeHint, { color: subText }]}>
+                Use these words naturally in your conversations today to earn
+                rewards.
+              </ThemedText>
+            </View>
+          </View>
           <View style={styles.challengeWordRow}>
             {dailyWords.map((word) => {
               const matched = matchedDailyWords.includes(word);
@@ -548,18 +574,18 @@ export default function ProgressScreen() {
               { opacity: pressed ? 0.85 : 1 },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Show longest streak"
+            accessibilityLabel={`Current day streak, ${streakData.current}. Show longest streak.`}
           >
             <Image
-              source={ACHIEVEMENTS_CONFIG[2].imageSource}
-              style={styles.statIconImage}
+              source={PROGRESS_ASSETS.dailyStreak}
+              style={[
+                styles.statHeroImage,
+                { width: statHeroImageSize, height: statHeroImageSize },
+              ]}
               resizeMode="contain"
             />
             <ThemedText style={[styles.statValue, { color: accentColor }]}>
               {streakData.current}
-            </ThemedText>
-            <ThemedText style={[styles.statLabel, { color: subText }]}>
-              Current Day Streak
             </ThemedText>
           </Pressable>
 
@@ -569,17 +595,18 @@ export default function ProgressScreen() {
               isCompact && styles.statBoxCompact,
               isVeryCompact && styles.statBoxVeryCompact,
             ]}
+            accessibilityLabel={`Days practiced, ${streakData.totalDays}`}
           >
             <Image
-              source={ACHIEVEMENTS_CONFIG[5].imageSource}
-              style={styles.statIconImage}
+              source={PROGRESS_ASSETS.daysPracticed}
+              style={[
+                styles.statHeroImage,
+                { width: statHeroImageSize, height: statHeroImageSize },
+              ]}
               resizeMode="contain"
             />
             <ThemedText style={[styles.statValue, { color: accentColor }]}>
               {streakData.totalDays}
-            </ThemedText>
-            <ThemedText style={[styles.statLabel, { color: subText }]}>
-              Days Practiced
             </ThemedText>
           </View>
         </View>
@@ -734,9 +761,9 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     alignItems: "center",
     justifyContent: "flex-start",
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 14,
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
   },
   statBoxCompact: {
     width: "100%",
@@ -744,26 +771,37 @@ const styles = StyleSheet.create({
   statBoxVeryCompact: {
     width: "100%",
   },
-  statIconImage: {
-    width: 30,
-    height: 30,
+  statHeroImage: {
+    alignSelf: "center",
   },
   statValue: {
     fontSize: 28,
     fontWeight: "700",
     lineHeight: 34,
   },
-  statLabel: {
-    fontSize: 12,
-    fontWeight: "500",
-    lineHeight: 16,
-    textAlign: "center",
-    flexShrink: 1,
-  },
 
   section: {
     marginBottom: 28,
     gap: 12,
+  },
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 4,
+  },
+  sectionTitleImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+  },
+  sectionTitleTextCol: {
+    flex: 1,
+    gap: 6,
+    minWidth: 0,
+  },
+  sectionTitleInRow: {
+    marginBottom: 0,
   },
   sectionTitle: {
     fontSize: 16,
