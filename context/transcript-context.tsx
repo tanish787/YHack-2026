@@ -224,18 +224,19 @@ export function TranscriptProvider({
       const pending = options?.pendingSegment;
       const pendingText = pending?.text.trim();
 
-      const snapshot = pendingText
-        ? [
-            ...segments,
-            {
-              id: makeId(),
-              text: pendingText,
-              source: pending.source,
-              practiceContextId: pending.practiceContextId,
-              createdAt: Date.now(),
-            },
-          ]
-        : segments;
+      const snapshot =
+        pending && pendingText
+          ? [
+              ...segments,
+              {
+                id: makeId(),
+                text: pendingText,
+                source: pending.source,
+                practiceContextId: pending.practiceContextId,
+                createdAt: Date.now(),
+              },
+            ]
+          : segments;
 
       if (snapshot.length > 0) {
         const inferredPracticeContextId = [...snapshot]
