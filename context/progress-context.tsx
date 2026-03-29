@@ -156,14 +156,25 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       const todayEntryIndex = dailyEntries.findIndex((e) => e.date === today);
 
       if (todayEntryIndex >= 0) {
-        dailyEntries[todayEntryIndex].analysisCount += 1;
-        if (dailyEntries[todayEntryIndex].averageFillers === 0) {
-          dailyEntries[todayEntryIndex].averageFillers = fillerCount;
-        } else {
-          // Simple average of filler counts for the day
-          dailyEntries[todayEntryIndex].averageFillers =
-            (dailyEntries[todayEntryIndex].averageFillers + fillerCount) / 2;
-        }
+        const existingEntry = dailyEntries[todayEntryIndex];
+        const newAnalysisCount = existingEntry.analysisCount + 1;
+        const newAverageFillers =
+          existingEntry.analysisCount === 0
+            ? fillerCount
+            : (existingEntry.averageFillers * existingEntry.analysisCount + fillerCount) /
+              newAnalysisCount;
+
+        const updatedEntry: DailyEntry = {
+          ...existingEntry,
+          analysisCount: newAnalysisCount,
+          averageFillers: newAverageFillers,
+        };
+
+        dailyEntries = [
+          ...dailyEntries.slice(0, todayEntryIndex),
+          updatedEntry,
+          ...dailyEntries.slice(todayEntryIndex + 1),
+        ];
       } else {
         dailyEntries.push({
           date: today,
