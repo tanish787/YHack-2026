@@ -1,4 +1,4 @@
-import { K2_CONFIG, validateConfig } from '@/config/k2-config';
+import { K2_CONFIG, validateConfig } from "@/config/k2-config";
 
 interface SpeechAnalysisResult {
   fillers: string[];
@@ -29,7 +29,7 @@ function extractFirstJsonObject(text: string): string | null {
       continue;
     }
 
-    if (char === '\\' && inString) {
+    if (char === "\\" && inString) {
       escapeNext = true;
       continue;
     }
@@ -41,10 +41,10 @@ function extractFirstJsonObject(text: string): string | null {
 
     if (inString) continue;
 
-    if (char === '{') {
+    if (char === "{") {
       if (braceCount === 0) startIndex = i;
       braceCount += 1;
-    } else if (char === '}') {
+    } else if (char === "}") {
       braceCount -= 1;
       if (braceCount === 0 && startIndex !== -1) {
         return text.substring(startIndex, i + 1);
@@ -57,36 +57,36 @@ function extractFirstJsonObject(text: string): string | null {
 
 function coerceAnalysisResult(raw: unknown): SpeechAnalysisResult {
   const data = raw as Partial<SpeechAnalysisResult> | null;
-  if (!data || typeof data !== 'object') {
-    throw new Error('LLM response is not a JSON object');
+  if (!data || typeof data !== "object") {
+    throw new Error("LLM response is not a JSON object");
   }
 
   const fillers = Array.isArray(data.fillers)
-    ? data.fillers.filter((x): x is string => typeof x === 'string')
+    ? data.fillers.filter((x): x is string => typeof x === "string")
     : [];
   const vagueLanguage = Array.isArray(data.vagueLanguage)
-    ? data.vagueLanguage.filter((x): x is string => typeof x === 'string')
+    ? data.vagueLanguage.filter((x): x is string => typeof x === "string")
     : [];
   const suggestions = Array.isArray(data.suggestions)
-    ? data.suggestions.filter((x): x is string => typeof x === 'string')
+    ? data.suggestions.filter((x): x is string => typeof x === "string")
     : [];
 
   const scoreRaw = data.overall_score;
   const scoreNum =
-    typeof scoreRaw === 'number'
+    typeof scoreRaw === "number"
       ? scoreRaw
-      : typeof scoreRaw === 'string'
+      : typeof scoreRaw === "string"
         ? Number(scoreRaw)
         : NaN;
 
-  const details = typeof data.details === 'string' ? data.details.trim() : '';
+  const details = typeof data.details === "string" ? data.details.trim() : "";
 
   if (!Number.isFinite(scoreNum)) {
-    throw new Error('LLM response missing valid overall_score');
+    throw new Error("LLM response missing valid overall_score");
   }
 
   if (!details) {
-    throw new Error('LLM response missing details');
+    throw new Error("LLM response missing details");
   }
 
   return {
@@ -115,23 +115,23 @@ const getModelName = (): string => {
  * Identifies: filler words, vague language, and provides improvement suggestions
  */
 export async function analyzeSpeechPatterns(
-  speechText: string
+  speechText: string,
 ): Promise<SpeechAnalysisResult> {
   if (!speechText || speechText.trim().length === 0) {
-    throw new Error('Please provide some speech text to analyze');
+    throw new Error("Please provide some speech text to analyze");
   }
 
   const apiKey = getApiKey();
   const endpoint = getApiEndpoint();
   const model = getModelName();
 
-  console.log('Starting speech analysis...');
-  console.log('Endpoint:', endpoint);
-  console.log('Model:', model);
-  console.log('API Key length:', apiKey.length);
+  console.log("Starting speech analysis...");
+  console.log("Endpoint:", endpoint);
+  console.log("Model:", model);
+  console.log("API Key length:", apiKey.length);
 
   const systemPrompt =
-    'You are a speech coach JSON API. Return one valid JSON object only. No markdown, no prose, no code fences.';
+    "You are a speech coach JSON API. Return one valid JSON object only. No markdown, no prose, no code fences.";
 
   const userPrompt = `Analyze this speech text for filler words, vague language, and overall quality. Output ONLY this JSON format with no other text:
 
@@ -150,7 +150,9 @@ Speech to analyze: "${speechText}"`;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     const isRetry = attempt > 0;
     if (isRetry) {
-      console.log(`Retrying speech analysis (attempt ${attempt + 1}/${MAX_RETRIES + 1})`);
+      console.log(
+        `Retrying speech analysis (attempt ${attempt + 1}/${MAX_RETRIES + 1})`,
+      );
       await delay(500 * attempt);
     }
 
@@ -158,16 +160,16 @@ Speech to analyze: "${speechText}"`;
       model,
       messages: [
         {
-          role: 'system',
+          role: "system",
           content: systemPrompt,
         },
         {
-          role: 'user',
+          role: "user",
           content:
             userPrompt +
             (isRetry
-              ? '\n\nIMPORTANT: previous response could not be parsed. Return a complete JSON object only.'
-              : ''),
+              ? "\n\nIMPORTANT: previous response could not be parsed. Return a complete JSON object only."
+              : ""),
         },
       ],
       stream: false,
@@ -180,10 +182,10 @@ Speech to analyze: "${speechText}"`;
 
     try {
       const response = await fetch(endpoint, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+          "Content-Type": "application/json",
+          Accept: "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(requestBody),
@@ -193,7 +195,7 @@ Speech to analyze: "${speechText}"`;
       const responseText = await response.text();
       clearTimeout(timeoutId);
 
-      console.log('Response received:', response.status, response.statusText);
+      console.log("Response received:", response.status, response.statusText);
 
       if (!response.ok) {
         let errorMessage = `API Error ${response.status}`;
@@ -221,7 +223,9 @@ Speech to analyze: "${speechText}"`;
       let data: {
         choices?: Array<{
           finish_reason?: string;
-          message?: { content?: string | Array<{ text?: string; type?: string }> };
+          message?: {
+            content?: string | Array<{ text?: string; type?: string }>;
+          };
         }>;
       };
 
@@ -229,44 +233,46 @@ Speech to analyze: "${speechText}"`;
         data = JSON.parse(responseText) as typeof data;
       } catch {
         lastError = new Error(
-          `API response is not valid JSON: ${responseText.substring(0, 200)}`
+          `API response is not valid JSON: ${responseText.substring(0, 200)}`,
         );
         continue;
       }
 
       const choice = data.choices?.[0];
-      const finishReason = choice?.finish_reason ?? '';
+      const finishReason = choice?.finish_reason ?? "";
       const rawContent = choice?.message?.content;
       const analysisContent =
-        typeof rawContent === 'string'
+        typeof rawContent === "string"
           ? rawContent
           : Array.isArray(rawContent)
             ? rawContent
-                .map((part) => (typeof part?.text === 'string' ? part.text : ''))
-                .join('')
-            : '';
+                .map((part) =>
+                  typeof part?.text === "string" ? part.text : "",
+                )
+                .join("")
+            : "";
 
       if (!analysisContent.trim()) {
-        lastError = new Error('API returned empty analysis content');
+        lastError = new Error("API returned empty analysis content");
         continue;
       }
 
-      if (finishReason === 'length') {
-        lastError = new Error('LLM response was truncated due to token limit');
+      if (finishReason === "length") {
+        lastError = new Error("LLM response was truncated due to token limit");
         continue;
       }
 
       const cleaned = analysisContent
-        .replace(/<[^>]*>/g, '')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
+        .replace(/<[^>]*>/g, "")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&")
         .trim();
 
       const jsonString = extractFirstJsonObject(cleaned);
       if (!jsonString) {
         lastError = new Error(
-          `Could not extract complete JSON from model output: ${cleaned.substring(0, 200)}`
+          `Could not extract complete JSON from model output: ${cleaned.substring(0, 200)}`,
         );
         continue;
       }
@@ -277,22 +283,29 @@ Speech to analyze: "${speechText}"`;
       } catch (parseError) {
         lastError = new Error(
           `Failed to parse analysis JSON: ${
-            parseError instanceof Error ? parseError.message : 'Unknown parse error'
-          }`
+            parseError instanceof Error
+              ? parseError.message
+              : "Unknown parse error"
+          }`,
         );
         continue;
       }
     } catch (error) {
       clearTimeout(timeoutId);
-      if (error instanceof Error && error.name === 'AbortError') {
-        lastError = new Error('Request timeout - the API server took too long to respond');
+      if (error instanceof Error && error.name === "AbortError") {
+        lastError = new Error(
+          "Request timeout - the API server took too long to respond",
+        );
       } else {
-        lastError = error instanceof Error ? error : new Error('Unknown analysis error');
+        lastError =
+          error instanceof Error ? error : new Error("Unknown analysis error");
       }
     }
   }
 
-  throw new Error(`Failed to analyze speech: ${lastError?.message || 'Unknown error'}`);
+  throw new Error(
+    `Failed to analyze speech: ${lastError?.message || "Unknown error"}`,
+  );
 }
 
 /**
