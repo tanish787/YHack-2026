@@ -105,7 +105,15 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       const todayEntryIndex = dailyEntries.findIndex((e) => e.date === today);
       
       if (todayEntryIndex >= 0) {
-        dailyEntries[todayEntryIndex].practiceMinutes += minutes;
+        const existingEntry = dailyEntries[todayEntryIndex];
+        dailyEntries = [
+          ...dailyEntries.slice(0, todayEntryIndex),
+          {
+            ...existingEntry,
+            practiceMinutes: existingEntry.practiceMinutes + minutes,
+          },
+          ...dailyEntries.slice(todayEntryIndex + 1),
+        ];
       } else {
         dailyEntries.push({
           date: today,
