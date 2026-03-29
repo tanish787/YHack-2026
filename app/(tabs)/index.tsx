@@ -341,7 +341,7 @@ const styles = StyleSheet.create({
   optionDescription: {
     fontSize: 13,
     fontWeight: '500',
-    lineHeight: 1.4,
+    lineHeight: 18,
   },
 
   // Age Section
