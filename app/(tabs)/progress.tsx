@@ -166,10 +166,10 @@ export default function ProgressScreen() {
             </ThemedText>
           ) : (
             <View style={styles.activityList}>
-              {progress.dailyEntries.slice(-5).reverse().map((entry, index) => (
-                <View key={index} style={styles.activityRow}>
+              {progress.dailyEntries.slice(-5).reverse().map((entry) => (
+                <View key={entry.date} style={styles.activityRow}>
                   <ThemedText style={[styles.activityDate, { color: subText }]}>
-                    {new Date(entry.date).toLocaleDateString('en-US', {
+                    {new Date(`${entry.date}T00:00:00`).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
                     })}
