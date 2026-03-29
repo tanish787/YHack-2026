@@ -77,28 +77,30 @@ export default function AnalyticsScreen() {
     setAnalysis(null);
 
     try {
-      console.log('═══════════════════════════════════════════════════════');
-      console.log('📊 ANALYTICS PAGE - INITIATING ANALYSIS');
-      console.log('═══════════════════════════════════════════════════════');
-      console.log(
-        `📝 Input Text: ${speechText.substring(0, 100)}${speechText.length > 100 ? '...' : ''}`,
-      );
-      console.log(`🎯 Selected Focus: ${selectedFocus}`);
-      console.log(`👤 User Proficiency: ${profile.proficiencyLevel}`);
-      console.log(`🎯 Improvement Goals: ${profile.improvementGoals.join(', ')}`);
-      console.log(`📏 Text Length: ${speechText.length} characters`);
-      console.log('───────────────────────────────────────────────────────');
-      
+      if (__DEV__) {
+        console.log('═══════════════════════════════════════════════════════');
+        console.log('📊 ANALYTICS PAGE - INITIATING ANALYSIS');
+        console.log('═══════════════════════════════════════════════════════');
+        console.log(`📝 Input Text: ${speechText.substring(0, 100)}${speechText.length > 100 ? '...' : ''}`);
+        console.log(`🎯 Selected Focus: ${selectedFocus}`);
+        console.log(`👤 User Proficiency: ${profile.proficiencyLevel}`);
+        console.log(`🎯 Improvement Goals: ${profile.improvementGoals.join(', ')}`);
+        console.log(`📏 Text Length: ${speechText.length} characters`);
+        console.log('───────────────────────────────────────────────────────');
+      }
+
       const result = await analyzeSpeechPatterns(
         speechText,
         selectedFocus,
         profile.proficiencyLevel,
         profile.improvementGoals,
       );
-      
-      console.log('───────────────────────────────────────────────────────');
-      console.log('✅ Analysis Complete - Updating UI');
-      console.log('═══════════════════════════════════════════════════════\n');
+
+      if (__DEV__) {
+        console.log('───────────────────────────────────────────────────────');
+        console.log('✅ Analysis Complete - Updating UI');
+        console.log('═══════════════════════════════════════════════════════\n');
+      }
       
       setAnalysis(result);
       
