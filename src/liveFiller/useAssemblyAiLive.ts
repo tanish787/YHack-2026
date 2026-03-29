@@ -224,7 +224,8 @@ function findFillerHits(text: string): string[] {
 
 export function useAssemblyAiLive() {
   const wsRef = useRef<WebSocket | null>(null);
-  const lastTranscriptRef = useRef("");
+  const committedTranscriptRef = useRef("");
+  const lastTurnTranscriptRef = useRef("");
   const lastBuzzAtRef = useRef(0);
 
   const [connected, setConnected] = useState(false);
@@ -295,11 +296,33 @@ export function useAssemblyAiLive() {
           }
 
           if (msg.type === "Turn") {
-            const current = msg.transcript ?? "";
-            setTranscript(current);
+            const current = (msg.transcript ?? "").trim();
 
-            const delta = extractNewText(lastTranscriptRef.current, current);
-            lastTranscriptRef.current = current;
+            // Show all finalized turns plus the current in-progress turn.
+            if (msg.end_of_turn) {
+              if (current.length > 0) {
+                const nextCommitted = committedTranscriptRef.current
+                  ? `${committedTranscriptRef.current}\n${current}`
+                  : current;
+                committedTranscriptRef.current = nextCommitted;
+                setTranscript(nextCommitted);
+              } else {
+                setTranscript(committedTranscriptRef.current);
+              }
+            } else {
+              const preview = committedTranscriptRef.current
+                ? current
+                  ? `${committedTranscriptRef.current}\n${current}`
+                  : committedTranscriptRef.current
+                : current;
+              setTranscript(preview);
+            }
+
+            const delta = extractNewText(
+              lastTurnTranscriptRef.current,
+              current,
+            );
+            lastTurnTranscriptRef.current = msg.end_of_turn ? "" : current;
 
             const hits = findFillerHits(delta);
             if (hits.length > 0) {
@@ -360,6 +383,7 @@ export function useAssemblyAiLive() {
     setConnected(false);
     setConnecting(false);
     setSessionId(null);
+    lastTurnTranscriptRef.current = "";
   }, []);
 
   const sendPcmChunk = useCallback((chunk: ArrayBuffer) => {
@@ -372,7 +396,8 @@ export function useAssemblyAiLive() {
   const resetTranscript = useCallback(() => {
     setTranscript("");
     setLastHits([]);
-    lastTranscriptRef.current = "";
+    committedTranscriptRef.current = "";
+    lastTurnTranscriptRef.current = "";
   }, []);
 
   useEffect(() => {
