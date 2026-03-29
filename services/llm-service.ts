@@ -354,7 +354,11 @@ export async function analyzeSpeechPatterns(
       .replace(/&amp;/g, '&')
       .trim();
 
-    console.log(`🔍 Raw response (first 500 chars): ${analysisContent.substring(0, 500)}`);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🔍 Raw response (first 500 chars): ${analysisContent.substring(0, 500)}`);
+    } else {
+      console.log(`🔍 Raw response content redacted in production (length: ${analysisContent.length} characters)`);
+    }
 
     // Use the new extraction function
     const extractedObj = extractValidJSON(analysisContent);
