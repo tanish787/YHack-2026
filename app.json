@@ -11,11 +11,16 @@
     "extra": {
       "k2ThinkV2ApiKey": "${K2_THINK_V2_API_KEY}",
       "k2ThinkV2ApiEndpoint": "${K2_THINK_V2_API_ENDPOINT}",
-      "k2ThinkV2Model": "${K2_THINK_V2_MODEL}"
+      "k2ThinkV2Model": "${K2_THINK_V2_MODEL}",
+      "apiBaseUrl": "http://YOUR_COMPUTER_IP:3001"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.my-app"
+      "bundleIdentifier": "com.anonymous.yhack2026",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow $(PRODUCT_NAME) to use speech recognition.",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use the microphone."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -25,7 +30,12 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.anonymous.myapp"
     },
     "web": {
       "output": "static",
@@ -33,7 +43,21 @@
     },
     "plugins": [
       "expo-router",
-      "expo-speech-recognition",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone.",
+          "enableBackgroundPlayback": true,
+          "enableBackgroundRecording": true
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to use the microphone.",
+          "speechRecognitionPermission": "Allow $(PRODUCT_NAME) to use speech recognition."
+        }
+      ],
       [
         "expo-splash-screen",
         {

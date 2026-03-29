@@ -20,6 +20,7 @@ const MAPPING = {
   'chevron.right': 'chevron-right',
   'mic.fill': 'mic',
   'info.circle.fill': 'info',
+  'iphone.radiowaves.left.and.right': 'vibration',
 } as IconMapping;
 
 /**

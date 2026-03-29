@@ -1,13 +1,15 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  AppState,
+  AppStateStatus,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -23,6 +25,10 @@ import {
     analyzeSpeechPatterns,
     validateApiConfiguration,
 } from "@/services/llm-service";
+import {
+  transcribeBackgroundRecording,
+  useBackgroundCaptureRecorder,
+} from "@/src/backgroundCapture/recorder";
 
 interface AnalysisResult {
   fillers: string[];
@@ -49,11 +55,89 @@ export default function AnalyticsScreen() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const {
+    recording: backgroundRecording,
+    start,
+    stop,
+  } = useBackgroundCaptureRecorder();
+  const [processingBackgroundAudio, setProcessingBackgroundAudio] =
+    useState(false);
+  const [backgroundStatus, setBackgroundStatus] = useState<string | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   const bgColor = useThemeColor({}, "background");
   const textColor = useThemeColor({}, "text");
   const muted = useThemeColor({}, "icon");
   const cardBg = colorScheme === "dark" ? "#1c2124" : "#f0f4f8";
+
+  const stopAndTranscribeBackgroundCapture = useCallback(async () => {
+    setProcessingBackgroundAudio(true);
+    setBackgroundStatus("Stopping recording...");
+
+    try {
+      const stopResult = await stop();
+
+      if (!stopResult.uri) {
+        setBackgroundStatus("No recording found to transcribe.");
+        return;
+      }
+
+      setBackgroundStatus("Transcribing recorded audio...");
+      const transcript = await transcribeBackgroundRecording(stopResult.uri);
+      const trimmed = transcript.trim();
+
+      if (!trimmed) {
+        setBackgroundStatus("No speech detected in the background recording.");
+        return;
+      }
+
+      await appendSegment(trimmed, "listening");
+      setBackgroundStatus("Background transcript added.");
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to process background recording.";
+      setBackgroundStatus(message);
+      Alert.alert("Background Capture Error", message);
+    } finally {
+      setProcessingBackgroundAudio(false);
+    }
+  }, [appendSegment, stop]);
+
+  const handleBackgroundCapturePress = useCallback(async () => {
+    if (backgroundRecording) {
+      await stopAndTranscribeBackgroundCapture();
+      return;
+    }
+
+    try {
+      await start();
+      setBackgroundStatus("Recording in background is active.");
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to start background recording.";
+      setBackgroundStatus(message);
+      Alert.alert("Background Capture Error", message);
+    }
+  }, [backgroundRecording, start, stopAndTranscribeBackgroundCapture]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      const wasInBackground = /inactive|background/.test(appStateRef.current);
+      appStateRef.current = nextState;
+
+      if (wasInBackground && nextState === "active" && backgroundRecording) {
+        void stopAndTranscribeBackgroundCapture();
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [backgroundRecording, stopAndTranscribeBackgroundCapture]);
 
   const handleAnalyze = async () => {
     // Validate configuration first
@@ -67,10 +151,19 @@ export default function AnalyticsScreen() {
       return;
     }
 
-    if (!speechText.trim()) {
-      Alert.alert("Input Required", "Please enter some speech text to analyze");
+    const transcriptToAnalyze = fullTranscript.trim();
+    if (!transcriptToAnalyze) {
+      Alert.alert(
+        "No Transcript Available",
+        "Start a listening session on the Coach tab first.",
+      );
       return;
     }
+    /* await setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+    }); */
 
     setIsLoading(true);
     setError(null);
@@ -125,21 +218,8 @@ export default function AnalyticsScreen() {
   };
 
   const handleClear = () => {
-    setSpeechText("");
     setAnalysis(null);
     setError(null);
-  };
-
-  const handleSaveToTranscriptOnly = async () => {
-    if (!speechText.trim()) {
-      Alert.alert(
-        "Input Required",
-        "Enter some text to save to the transcript.",
-      );
-      return;
-    }
-    await appendSegment(speechText.trim(), "analytics");
-    Alert.alert("Saved", "This text was added to your running transcript.");
   };
 
   const [clearingTranscript, setClearingTranscript] = useState(false);
@@ -149,7 +229,6 @@ export default function AnalyticsScreen() {
     setClearingTranscript(true);
     try {
       await clearTranscript();
-      setSpeechText("");
       setAnalysis(null);
       setError(null);
     } catch {
@@ -243,13 +322,17 @@ export default function AnalyticsScreen() {
             )}
             {fullTranscript.trim().length > 0 || segments.length > 0 ? (
               <Pressable
-                style={[styles.linkBtn, clearingTranscript && styles.linkBtnDisabled]}
+                style={[
+                  styles.linkBtn,
+                  clearingTranscript && styles.linkBtnDisabled,
+                ]}
                 onPress={() => void handleClearStoredTranscript()}
                 disabled={clearingTranscript}
                 accessibilityRole="button"
-                accessibilityLabel="Clear saved transcript and analysis">
+                accessibilityLabel="Clear saved transcript and analysis"
+              >
                 <Text style={styles.linkBtnText}>
-                  {clearingTranscript ? 'Clearing…' : 'Clear saved transcript'}
+                  {clearingTranscript ? "Clearing…" : "Clear saved transcript"}
                 </Text>
               </Pressable>
             ) : null}
@@ -259,7 +342,7 @@ export default function AnalyticsScreen() {
         {/* Input Section */}
         <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
           <Text style={[styles.label, { color: textColor }]}>
-            Paste your speech or conversation:
+            Saved speech or conversation:
           </Text>
           <TextInput
             style={[
@@ -270,16 +353,39 @@ export default function AnalyticsScreen() {
                 borderColor: colorScheme === "dark" ? "#404854" : "#e5e7eb",
               },
             ]}
-            placeholder="Enter your speech text here..."
+            placeholder="Your saved transcript will appear here..."
             placeholderTextColor={
               colorScheme === "dark" ? "#9ca3af" : "#9ca3af"
             }
             multiline
             numberOfLines={6}
-            value={speechText}
-            onChangeText={setSpeechText}
-            editable={!isLoading}
+            value={fullTranscript}
+            editable={false}
           />
+          <View style={styles.backgroundCaptureSection}>
+            <Pressable
+              style={[
+                styles.backgroundCaptureBtn,
+                backgroundRecording
+                  ? styles.backgroundCaptureStopBtn
+                  : styles.backgroundCaptureStartBtn,
+                processingBackgroundAudio && styles.buttonDisabled,
+              ]}
+              onPress={() => void handleBackgroundCapturePress()}
+              disabled={processingBackgroundAudio}
+            >
+              <Text style={styles.backgroundCaptureBtnText}>
+                {backgroundRecording
+                  ? "Stop Background Capture"
+                  : "Start Background Capture"}
+              </Text>
+            </Pressable>
+            {backgroundStatus ? (
+              <Text style={[styles.backgroundCaptureStatus, { color: muted }]}>
+                {backgroundStatus}
+              </Text>
+            ) : null}
+          </View>
         </ThemedView>
 
         {/* Action Buttons */}
@@ -288,10 +394,10 @@ export default function AnalyticsScreen() {
             style={[
               styles.button,
               styles.analyzeButton,
-              isLoading && styles.buttonDisabled,
+              (isLoading || processingBackgroundAudio) && styles.buttonDisabled,
             ]}
             onPress={handleAnalyze}
-            disabled={isLoading}
+            disabled={isLoading || processingBackgroundAudio}
           >
             {isLoading ? (
               <ActivityIndicator color="#ffffff" />
@@ -307,16 +413,6 @@ export default function AnalyticsScreen() {
             <Text style={[styles.buttonText, { color: "#007AFF" }]}>Clear</Text>
           </Pressable>
         </View>
-
-        <Pressable
-          style={[styles.saveTranscriptBtn, isLoading && styles.buttonDisabled]}
-          onPress={handleSaveToTranscriptOnly}
-          disabled={isLoading}
-        >
-          <Text style={[styles.saveTranscriptBtnText, { color: textColor }]}>
-            Save text to transcript (no AI)
-          </Text>
-        </Pressable>
 
         {/* Loading State */}
         {isLoading && (
@@ -415,7 +511,7 @@ export default function AnalyticsScreen() {
         )}
 
         {/* Empty State */}
-        {!analysis && !isLoading && speechText && !error && (
+        {!analysis && !isLoading && fullTranscript.trim() && !error && (
           <ThemedView style={[styles.emptyState, { backgroundColor: cardBg }]}>
             <Text style={[styles.emptyStateText, { color: textColor }]}>
               Tap {"\u201c"}Analyze Speech{"\u201d"} to get started
@@ -456,6 +552,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlignVertical: "top",
     minHeight: 120,
+  },
+  backgroundCaptureSection: {
+    marginTop: 14,
+    gap: 8,
+  },
+  backgroundCaptureBtn: {
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  backgroundCaptureStartBtn: {
+    backgroundColor: "#7c3aed",
+  },
+  backgroundCaptureStopBtn: {
+    backgroundColor: "#b91c1c",
+  },
+  backgroundCaptureBtnText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  backgroundCaptureStatus: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   buttonContainer: {
     flexDirection: "row",
@@ -620,15 +741,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#ef4444",
     fontWeight: "600",
-  },
-  saveTranscriptBtn: {
-    paddingVertical: 12,
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  saveTranscriptBtnText: {
-    fontSize: 15,
-    fontWeight: "600",
-    textDecorationLine: "underline",
   },
 });
