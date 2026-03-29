@@ -782,6 +782,113 @@ Context:
   }
 }
 
+export async function validateDailyWordChallengeUsage(
+  transcriptText: string,
+  challengeWords: string[],
+): Promise<string[]> {
+  const trimmedTranscript = transcriptText.trim();
+  const normalizedWords = Array.from(
+    new Set(
+      challengeWords
+        .map((word) => word.toLowerCase().trim())
+        .filter((word) => /^[a-z]{2,30}$/.test(word)),
+    ),
+  );
+
+  if (!trimmedTranscript || normalizedWords.length === 0) {
+    return [];
+  }
+
+  const apiKey = getApiKey();
+  const endpoint = getApiEndpoint();
+  const model = getModelName();
+
+  const prompt = `Determine which challenge words are used correctly in natural sentence context.
+Return ONLY valid JSON in this exact format: {"earned_words":["word1","word2"]}
+Rules:
+- A word is earned only if it is used semantically correctly in a sentence.
+- Ignore isolated mentions, fragments, quoted lists, misspellings, and incorrect usage.
+- Return only words from the challenge list.
+- lowercase words only.
+Challenge words: ${normalizedWords.join(", ")}
+Transcript:
+"""
+${trimmedTranscript.slice(-5000)}
+"""`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a strict JSON validator. Output only valid JSON and no extra text.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        stream: false,
+        temperature: 0,
+        max_tokens: 220,
+      }),
+      signal: controller.signal,
+    });
+
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `Daily word usage API error ${response.status}: ${responseText}`,
+      );
+    }
+
+    const data = JSON.parse(responseText) as {
+      choices?: Array<{
+        message?: { content?: string | Array<{ text?: string }> };
+      }>;
+    };
+
+    const rawContent = data.choices?.[0]?.message?.content;
+    const content =
+      typeof rawContent === "string"
+        ? rawContent
+        : Array.isArray(rawContent)
+          ? rawContent
+              .map((part) => (typeof part?.text === "string" ? part.text : ""))
+              .join("")
+          : "";
+
+    const jsonString = extractFirstJsonObject(content.trim());
+    if (!jsonString) {
+      throw new Error("Could not extract JSON for daily word usage validation");
+    }
+
+    const parsed = JSON.parse(jsonString) as { earned_words?: unknown };
+    const earned = Array.isArray(parsed.earned_words)
+      ? parsed.earned_words
+          .filter((word): word is string => typeof word === "string")
+          .map((word) => word.toLowerCase().trim())
+      : [];
+
+    const allowedWords = new Set(normalizedWords);
+    return Array.from(new Set(earned)).filter((word) => allowedWords.has(word));
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /**
  * Validates the API configuration
  */

@@ -9,8 +9,6 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
-  AppState,
-  AppStateStatus,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -46,10 +44,6 @@ import {
   validateApiConfiguration,
 } from "@/services/llm-service";
 import { buildSpeechHistoryPayload } from "@/services/speech-history-payload";
-import {
-  transcribeBackgroundRecording,
-  useBackgroundCaptureRecorder,
-} from "@/src/backgroundCapture/recorder";
 
 interface AnalysisResult {
   fillers: string[];
@@ -83,15 +77,6 @@ export default function AnalyticsScreen() {
   const [analysisHistoryRows, setAnalysisHistoryRows] = useState<
     SpeechAnalyticsHistoryRecord[]
   >([]);
-  const {
-    recording: backgroundRecording,
-    start,
-    stop,
-  } = useBackgroundCaptureRecorder();
-  const [processingBackgroundAudio, setProcessingBackgroundAudio] =
-    useState(false);
-  const [backgroundStatus, setBackgroundStatus] = useState<string | null>(null);
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const autoRunLockRef = useRef(false);
 
   const bgColor = useThemeColor({}, "background");
@@ -174,9 +159,7 @@ export default function AnalyticsScreen() {
       const practiceTitle = session.practiceContextId
         ? practiceTitleById.get(session.practiceContextId)
         : undefined;
-      return practiceTitle
-        ? `${practiceTitle} Practice`
-        : "Presentation Practice";
+      return practiceTitle ? `${practiceTitle} Practice` : "Live Coaching";
     },
     [practiceTitleById],
   );
@@ -217,82 +200,6 @@ export default function AnalyticsScreen() {
       ],
     );
   }, [clearArchivedSessions]);
-
-  const stopAndTranscribeBackgroundCapture = useCallback(async () => {
-    setProcessingBackgroundAudio(true);
-    setBackgroundStatus("Stopping recording...");
-
-    try {
-      const stopResult = await stop();
-
-      if (!stopResult.uri) {
-        setBackgroundStatus("No recording found to transcribe.");
-        return;
-      }
-
-      setBackgroundStatus("Transcribing recorded audio...");
-      const transcript = await transcribeBackgroundRecording(stopResult.uri);
-      const trimmed = transcript.trim();
-
-      if (!trimmed) {
-        setBackgroundStatus("No speech detected in the background recording.");
-        return;
-      }
-
-      await appendSegment(trimmed, "background");
-      setBackgroundStatus("Background transcript added.");
-      await handleAnalyze(trimmed, "background");
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Failed to process background recording.";
-      setBackgroundStatus(message);
-      Alert.alert("Background Capture Error", message);
-    } finally {
-      setProcessingBackgroundAudio(false);
-    }
-  }, [appendSegment, stop]);
-
-  const handleBackgroundCapturePress = useCallback(async () => {
-    if (backgroundRecording) {
-      await stopAndTranscribeBackgroundCapture();
-      return;
-    }
-
-    try {
-      await startNewRecordingSession("background");
-      await start();
-      setBackgroundStatus("Recording in background is active.");
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Failed to start background recording.";
-      setBackgroundStatus(message);
-      Alert.alert("Background Capture Error", message);
-    }
-  }, [
-    backgroundRecording,
-    start,
-    startNewRecordingSession,
-    stopAndTranscribeBackgroundCapture,
-  ]);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (nextState) => {
-      const wasInBackground = /inactive|background/.test(appStateRef.current);
-      appStateRef.current = nextState;
-
-      if (wasInBackground && nextState === "active" && backgroundRecording) {
-        void stopAndTranscribeBackgroundCapture();
-      }
-    });
-
-    return () => {
-      sub.remove();
-    };
-  }, [backgroundRecording, stopAndTranscribeBackgroundCapture]);
 
   const handleAnalyze = async (
     transcriptOverride?: string,
@@ -359,7 +266,7 @@ export default function AnalyticsScreen() {
           (runTrigger === "manual" &&
             transcriptToAnalyze === listeningTranscript &&
             listeningTranscript.length > 0)
-          ? selectedPracticeContext
+          ? (selectedPracticeContext ?? undefined)
           : undefined,
       );
 
@@ -409,7 +316,7 @@ export default function AnalyticsScreen() {
       return;
     }
 
-    if (!ready || isLoading || processingBackgroundAudio) return;
+    if (!ready || isLoading) return;
     if (autoRunLockRef.current) return;
 
     autoRunLockRef.current = true;
@@ -417,15 +324,7 @@ export default function AnalyticsScreen() {
 
     router.replace("/(tabs)/analytics");
     void handleAnalyze(undefined, trigger);
-  }, [
-    handleAnalyze,
-    isLoading,
-    params.autorun,
-    params.trigger,
-    processingBackgroundAudio,
-    ready,
-    router,
-  ]);
+  }, [handleAnalyze, isLoading, params.autorun, params.trigger, ready, router]);
 
   const handleClear = () => {
     setAnalysis(null);
@@ -489,31 +388,6 @@ export default function AnalyticsScreen() {
 
         {/* Input Section */}
         <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
-          <View style={styles.backgroundCaptureSection}>
-            <Pressable
-              style={[
-                styles.backgroundCaptureBtn,
-                backgroundRecording
-                  ? styles.backgroundCaptureStopBtn
-                  : styles.backgroundCaptureStartBtn,
-                processingBackgroundAudio && styles.buttonDisabled,
-              ]}
-              onPress={() => void handleBackgroundCapturePress()}
-              disabled={processingBackgroundAudio}
-            >
-              <Text style={styles.backgroundCaptureBtnText}>
-                {backgroundRecording
-                  ? "Stop Background Capture"
-                  : "Start Background Capture"}
-              </Text>
-            </Pressable>
-            {backgroundStatus ? (
-              <Text style={[styles.backgroundCaptureStatus, { color: muted }]}>
-                {backgroundStatus}
-              </Text>
-            ) : null}
-          </View>
-
           <TextInput
             style={[
               styles.textInput,
@@ -540,10 +414,10 @@ export default function AnalyticsScreen() {
             style={[
               styles.button,
               styles.analyzeButton,
-              (isLoading || processingBackgroundAudio) && styles.buttonDisabled,
+              isLoading && styles.buttonDisabled,
             ]}
             onPress={() => void handleAnalyze()}
-            disabled={isLoading || processingBackgroundAudio}
+            disabled={isLoading}
           >
             {isLoading ? (
               <ActivityIndicator color="#ffffff" />
@@ -745,7 +619,7 @@ export default function AnalyticsScreen() {
                           onPress={() =>
                             void handleAnalyze(session.transcript, trigger)
                           }
-                          disabled={isLoading || processingBackgroundAudio}
+                          disabled={isLoading}
                         >
                           <Text style={styles.historyAnalyzeBtnText}>
                             Analyze this session
@@ -927,32 +801,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlignVertical: "top",
     minHeight: 120,
-  },
-  backgroundCaptureSection: {
-    marginTop: 4,
-    marginBottom: 10,
-    gap: 8,
-  },
-  backgroundCaptureBtn: {
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backgroundCaptureStartBtn: {
-    backgroundColor: "#7c3aed",
-  },
-  backgroundCaptureStopBtn: {
-    backgroundColor: "#b91c1c",
-  },
-  backgroundCaptureBtnText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  backgroundCaptureStatus: {
-    fontSize: 13,
-    lineHeight: 18,
   },
   buttonContainer: {
     flexDirection: "row",

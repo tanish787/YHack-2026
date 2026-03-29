@@ -2,12 +2,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-  useWindowDimensions,
+    Alert,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -18,7 +18,10 @@ import { useProgress } from "@/context/progress-context";
 import { useTranscript } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
-import { generateDailyWordChallengeWords } from "@/services/llm-service";
+import {
+    generateDailyWordChallengeWords,
+    validateDailyWordChallengeUsage,
+} from "@/services/llm-service";
 
 const ACHIEVEMENTS_CONFIG = [
   {
@@ -111,6 +114,7 @@ const DAILY_WORD_BANK = [
 ];
 
 const DAILY_WORDS_STORAGE_PREFIX = "@speech_coach/daily_words/";
+const DAILY_WORD_USAGE_STORAGE_PREFIX = "@speech_coach/daily_word_usage/";
 
 function getDateKey(date = new Date()): string {
   return date.toISOString().slice(0, 10);
@@ -174,6 +178,8 @@ export default function ProgressScreen() {
   const [dailyWords, setDailyWords] = useState<string[]>(() =>
     getFallbackDailyWords(todayKey),
   );
+  const [matchedDailyWords, setMatchedDailyWords] = useState<string[]>([]);
+  const [validatingDailyWords, setValidatingDailyWords] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,13 +243,98 @@ export default function ProgressScreen() {
     return `${fullTranscript} ${todayArchived}`.toLowerCase();
   }, [archivedSessions, fullTranscript, todayKey]);
 
-  const matchedDailyWords = useMemo(() => {
+  const tokenMatchedDailyWords = useMemo(() => {
     const normalized = todaysTranscriptText.replace(/[^a-zA-Z\s']/g, " ");
     const tokenSet = new Set(normalized.split(/\s+/).filter(Boolean));
     return dailyWords.filter((word) => tokenSet.has(word.toLowerCase()));
   }, [dailyWords, todaysTranscriptText]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const validateUsage = async () => {
+      if (dailyWords.length === 0) {
+        setMatchedDailyWords([]);
+        return;
+      }
+
+      if (tokenMatchedDailyWords.length === 0) {
+        setMatchedDailyWords([]);
+        return;
+      }
+
+      const sourceHash = hashString(
+        `${todayKey}|${dailyWords.join(",")}|${todaysTranscriptText}`,
+      ).toString();
+      const storageKey = `${DAILY_WORD_USAGE_STORAGE_PREFIX}${todayKey}`;
+
+      try {
+        const cached = await AsyncStorage.getItem(storageKey);
+        if (cached) {
+          const parsed = JSON.parse(cached) as {
+            sourceHash?: string;
+            matchedWords?: string[];
+          };
+          if (
+            parsed?.sourceHash === sourceHash &&
+            Array.isArray(parsed.matchedWords)
+          ) {
+            if (!cancelled) {
+              setMatchedDailyWords(
+                parsed.matchedWords.filter((word) =>
+                  tokenMatchedDailyWords.includes(word),
+                ),
+              );
+            }
+            return;
+          }
+        }
+
+        if (!cancelled) {
+          setValidatingDailyWords(true);
+        }
+
+        const earnedWords = await validateDailyWordChallengeUsage(
+          todaysTranscriptText,
+          dailyWords,
+        );
+
+        if (!cancelled) {
+          const validatedWords = earnedWords.filter((word) =>
+            tokenMatchedDailyWords.includes(word),
+          );
+          setMatchedDailyWords(validatedWords);
+        }
+
+        await AsyncStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            sourceHash,
+            matchedWords: earnedWords,
+          }),
+        );
+      } catch {
+        if (!cancelled) {
+          setMatchedDailyWords([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setValidatingDailyWords(false);
+        }
+      }
+    };
+
+    void validateUsage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dailyWords, todayKey, todaysTranscriptText, tokenMatchedDailyWords]);
+
   const hasClaimedToday = hasClaimedWordReward(todayKey);
+  const shouldShowClaimButton = matchedDailyWords.length > 0 || hasClaimedToday;
+  const isClaimButtonDisabled =
+    hasClaimedToday || matchedDailyWords.length === 0;
 
   useEffect(() => {
     checkAndUnlockAchievements();
@@ -271,10 +362,12 @@ export default function ProgressScreen() {
     );
   }, [claimWordReward, matchedDailyWords.length, todayKey]);
 
-  const totalAnalyses = progress.dailyEntries.reduce(
-    (sum, entry) => sum + entry.analysisCount,
-    0,
-  );
+  const showLongestStreak = useCallback(() => {
+    Alert.alert(
+      "Longest streak",
+      `Your best run is ${streakData.longest} day${streakData.longest === 1 ? "" : "s"}.`,
+    );
+  }, [streakData.longest]);
 
   return (
     <SafeAreaView
@@ -312,72 +405,6 @@ export default function ProgressScreen() {
           <ThemedText style={[styles.subheading, { color: subText }]}>
             Track your progress, activity, and achievements
           </ThemedText>
-        </View>
-
-        <View style={styles.statsGrid}>
-          <View
-            style={[
-              styles.statBox,
-              isCompact && styles.statBoxCompact,
-              isVeryCompact && styles.statBoxVeryCompact,
-            ]}
-          >
-            <ThemedText style={styles.statEmoji}>🔥</ThemedText>
-            <ThemedText style={[styles.statValue, { color: accentColor }]}>
-              {streakData.current}
-            </ThemedText>
-            <ThemedText style={[styles.statLabel, { color: subText }]}>
-              Day Streak
-            </ThemedText>
-          </View>
-
-          <View
-            style={[
-              styles.statBox,
-              isCompact && styles.statBoxCompact,
-              isVeryCompact && styles.statBoxVeryCompact,
-            ]}
-          >
-            <ThemedText style={styles.statEmoji}>📈</ThemedText>
-            <ThemedText style={[styles.statValue, { color: successColor }]}>
-              {streakData.longest}
-            </ThemedText>
-            <ThemedText style={[styles.statLabel, { color: subText }]}>
-              Longest Streak
-            </ThemedText>
-          </View>
-
-          <View
-            style={[
-              styles.statBox,
-              isCompact && styles.statBoxCompact,
-              isVeryCompact && styles.statBoxVeryCompact,
-            ]}
-          >
-            <ThemedText style={styles.statEmoji}>✨</ThemedText>
-            <ThemedText style={[styles.statValue, { color: accentColor }]}>
-              {streakData.totalDays}
-            </ThemedText>
-            <ThemedText style={[styles.statLabel, { color: subText }]}>
-              Days Practiced
-            </ThemedText>
-          </View>
-
-          <View
-            style={[
-              styles.statBox,
-              isCompact && styles.statBoxCompact,
-              isVeryCompact && styles.statBoxVeryCompact,
-            ]}
-          >
-            <ThemedText style={styles.statEmoji}>📊</ThemedText>
-            <ThemedText style={[styles.statValue, { color: successColor }]}>
-              {totalAnalyses}
-            </ThemedText>
-            <ThemedText style={[styles.statLabel, { color: subText }]}>
-              Analyses Done
-            </ThemedText>
-          </View>
         </View>
 
         <View style={styles.section}>
@@ -422,31 +449,43 @@ export default function ProgressScreen() {
             Progress: {matchedDailyWords.length}/{dailyWords.length} words used
             · Points: {progress.rewardPoints}
           </ThemedText>
-
-          <Pressable
-            onPress={claimTodayWordReward}
-            disabled={hasClaimedToday || matchedDailyWords.length === 0}
-            style={({ pressed }) => [
-              styles.challengeClaimBtn,
-              {
-                backgroundColor:
-                  hasClaimedToday || matchedDailyWords.length === 0
-                    ? isDark
-                      ? "#374151"
-                      : "#94a3b8"
-                    : accentColor,
-                opacity: pressed ? 0.85 : 1,
-              },
-            ]}
-          >
-            <ThemedText style={styles.challengeClaimBtnText}>
-              {hasClaimedToday
-                ? "Reward claimed today"
-                : matchedDailyWords.length >= dailyWords.length
-                  ? "Claim 50 points + Wordsmith badge"
-                  : "Claim points for today's used words"}
+          {validatingDailyWords ? (
+            <ThemedText
+              style={[styles.challengeValidationText, { color: subText }]}
+            >
+              Validating sentence usage...
             </ThemedText>
-          </Pressable>
+          ) : null}
+
+          {shouldShowClaimButton ? (
+            <Pressable
+              onPress={claimTodayWordReward}
+              disabled={isClaimButtonDisabled}
+              style={({ pressed }) => [
+                styles.challengeClaimBtn,
+                {
+                  backgroundColor: isClaimButtonDisabled
+                    ? accentSoft + (isDark ? "66" : "99")
+                    : accentColor,
+                  borderColor: isClaimButtonDisabled ? accentSoft : accentColor,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              <ThemedText
+                style={[
+                  styles.challengeClaimBtnText,
+                  { color: isClaimButtonDisabled ? accentColor : "#ffffff" },
+                ]}
+              >
+                {hasClaimedToday
+                  ? "Reward claimed today"
+                  : matchedDailyWords.length >= dailyWords.length
+                    ? "Claim 50 points + Wordsmith badge"
+                    : "Claim points for today's used words"}
+              </ThemedText>
+            </Pressable>
+          ) : null}
 
           {hasClaimedToday ? (
             <ThemedText style={[styles.feedback, { color: successColor }]}>
@@ -455,52 +494,42 @@ export default function ProgressScreen() {
           ) : null}
         </View>
 
-        <View style={styles.section}>
-          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>
-            Latest Sessions
-          </ThemedText>
-          {progress.dailyEntries.length === 0 ? (
-            <ThemedText style={[styles.emptyState, { color: subText }]}>
-              Start practicing to build your streak!
+        <View style={styles.statsGrid}>
+          <Pressable
+            onPress={showLongestStreak}
+            style={({ pressed }) => [
+              styles.statBox,
+              isCompact && styles.statBoxCompact,
+              isVeryCompact && styles.statBoxVeryCompact,
+              { opacity: pressed ? 0.85 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Show longest streak"
+          >
+            <ThemedText style={styles.statEmoji}>🔥</ThemedText>
+            <ThemedText style={[styles.statValue, { color: accentColor }]}>
+              {streakData.current}
             </ThemedText>
-          ) : (
-            <View style={styles.activityList}>
-              {progress.dailyEntries
-                .slice(-5)
-                .reverse()
-                .map((entry) => (
-                  <View key={entry.date} style={styles.activityRow}>
-                    <ThemedText
-                      style={[styles.activityDate, { color: subText }]}
-                    >
-                      {new Date(`${entry.date}T00:00:00`).toLocaleDateString(
-                        "en-US",
-                        {
-                          month: "short",
-                          day: "numeric",
-                        },
-                      )}
-                    </ThemedText>
-                    <View style={styles.activityStats}>
-                      {entry.analysisCount > 0 && (
-                        <ThemedText
-                          style={[styles.activityTag, { color: successColor }]}
-                        >
-                          {entry.analysisCount}📝
-                        </ThemedText>
-                      )}
-                      {entry.averageFillers > 0 && (
-                        <ThemedText
-                          style={[styles.activityTag, { color: warningColor }]}
-                        >
-                          {Math.round(entry.averageFillers)}💬
-                        </ThemedText>
-                      )}
-                    </View>
-                  </View>
-                ))}
-            </View>
-          )}
+            <ThemedText style={[styles.statLabel, { color: subText }]}>
+              Current Day Streak
+            </ThemedText>
+          </Pressable>
+
+          <View
+            style={[
+              styles.statBox,
+              isCompact && styles.statBoxCompact,
+              isVeryCompact && styles.statBoxVeryCompact,
+            ]}
+          >
+            <ThemedText style={styles.statEmoji}>✨</ThemedText>
+            <ThemedText style={[styles.statValue, { color: accentColor }]}>
+              {streakData.totalDays}
+            </ThemedText>
+            <ThemedText style={[styles.statLabel, { color: subText }]}>
+              Days Practiced
+            </ThemedText>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -689,15 +718,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  challengeValidationText: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
   challengeClaimBtn: {
     marginTop: 4,
     borderRadius: 10,
+    borderWidth: 1,
     paddingVertical: 10,
     paddingHorizontal: 12,
     alignItems: "center",
   },
   challengeClaimBtnText: {
-    color: "#ffffff",
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 18,

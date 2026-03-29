@@ -2,7 +2,9 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+    Alert,
     AppState,
+    AppStateStatus,
     Platform,
     Pressable,
     ScrollView,
@@ -24,6 +26,10 @@ import { useCoachContext } from "@/context/coach-context";
 import { useTranscript } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
+import {
+    transcribeBackgroundRecording,
+    useBackgroundCaptureRecorder,
+} from "@/src/backgroundCapture/recorder";
 
 type PracticeContextId =
   | "presentation"
@@ -76,6 +82,15 @@ export default function CoachScreen() {
   const [listening, setListening] = useState(false);
   const [mistakeCount, setMistakeCount] = useState(0);
   const stopMicRef = useRef<StopMicStream | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const {
+    recording: backgroundRecording,
+    start: startBackgroundCapture,
+    stop: stopBackgroundCapture,
+  } = useBackgroundCaptureRecorder();
+  const [processingBackgroundAudio, setProcessingBackgroundAudio] =
+    useState(false);
+  const [backgroundStatus, setBackgroundStatus] = useState<string | null>(null);
 
   const {
     connect,
@@ -94,8 +109,38 @@ export default function CoachScreen() {
     setMistakeCount((count) => count + lastHits.length);
   }, [lastHits, listening]);
 
+  const startBackgroundModeFromLive = useCallback(async () => {
+    await stopMicRef.current?.();
+    stopMicRef.current = null;
+    disconnect();
+
+    const liveChunk = transcript.trim();
+    await startNewRecordingSession("live", {
+      practiceContextId: selectedPracticeContext ?? undefined,
+      pendingSegment: liveChunk
+        ? {
+            text: liveChunk,
+            source: "listening",
+            practiceContextId: selectedPracticeContext ?? undefined,
+          }
+        : undefined,
+    });
+
+    resetTranscript();
+    setListening(false);
+    await startBackgroundCapture();
+    setBackgroundStatus("Background mode is active.");
+  }, [
+    disconnect,
+    resetTranscript,
+    selectedPracticeContext,
+    startBackgroundCapture,
+    startNewRecordingSession,
+    transcript,
+  ]);
+
   const onListeningChange = useCallback(
-    async (next: boolean) => {
+    async (next: boolean, options?: { showBackgroundPrompt?: boolean }) => {
       if (Platform.OS !== "web") {
         void Haptics.impactAsync(
           next
@@ -108,6 +153,7 @@ export default function CoachScreen() {
         setMistakeCount(0);
         await startNewRecordingSession("live");
         resetTranscript();
+        setBackgroundStatus(null);
 
         try {
           await connect();
@@ -126,13 +172,66 @@ export default function CoachScreen() {
         disconnect();
 
         const chunk = transcript.trim();
-        if (chunk) {
-          await appendSegment(chunk, "listening", {
-            practiceContextId: selectedPracticeContext,
-          });
-        }
         setListening(false);
 
+        const showBackgroundPrompt = options?.showBackgroundPrompt ?? true;
+        if (showBackgroundPrompt) {
+          Alert.alert(
+            "End session",
+            "Do you want to continue in Background Mode or analyze this session now?",
+            [
+              {
+                text: "Analyze now",
+                onPress: () => {
+                  void (async () => {
+                    if (chunk) {
+                      await appendSegment(chunk, "listening", {
+                        practiceContextId: selectedPracticeContext ?? undefined,
+                      });
+                    }
+                    router.push({
+                      pathname: "/(tabs)/analytics",
+                      params: { autorun: "1", trigger: "live" },
+                    });
+                  })();
+                },
+              },
+              {
+                text: "Background Mode",
+                onPress: () => {
+                  void startBackgroundModeFromLive().catch((err) => {
+                    const message =
+                      err instanceof Error
+                        ? err.message
+                        : "Failed to start background recording.";
+                    setBackgroundStatus(message);
+                    Alert.alert("Background Mode Error", message);
+                  });
+                },
+              },
+              {
+                text: "Cancel",
+                style: "cancel",
+                onPress: () => {
+                  void (async () => {
+                    if (chunk) {
+                      await appendSegment(chunk, "listening", {
+                        practiceContextId: selectedPracticeContext ?? undefined,
+                      });
+                    }
+                  })();
+                },
+              },
+            ],
+          );
+          return;
+        }
+
+        if (chunk) {
+          await appendSegment(chunk, "listening", {
+            practiceContextId: selectedPracticeContext ?? undefined,
+          });
+        }
         router.push({
           pathname: "/(tabs)/analytics",
           params: { autorun: "1", trigger: "live" },
@@ -147,6 +246,7 @@ export default function CoachScreen() {
       router,
       sendPcmChunk,
       selectedPracticeContext,
+      startBackgroundModeFromLive,
       startNewRecordingSession,
       transcript,
     ],
@@ -158,7 +258,7 @@ export default function CoachScreen() {
         (nextState === "inactive" || nextState === "background") &&
         listening
       ) {
-        void onListeningChange(false);
+        void onListeningChange(false, { showBackgroundPrompt: false });
       }
     });
 
@@ -169,16 +269,15 @@ export default function CoachScreen() {
 
   const selectPracticeContext = useCallback(
     (id: PracticeContextId) => {
-      if (id === selectedPracticeContext) return;
       if (Platform.OS !== "web") {
         void Haptics.selectionAsync();
       }
-      setSelectedPracticeContext(id);
+      setSelectedPracticeContext((current) => (current === id ? null : id));
       if (listening) {
         setMistakeCount(0);
       }
     },
-    [selectedPracticeContext, setSelectedPracticeContext, listening],
+    [setSelectedPracticeContext, listening],
   );
 
   const resetMistakes = useCallback(() => {
@@ -187,6 +286,66 @@ export default function CoachScreen() {
     }
     setMistakeCount(0);
   }, []);
+
+  const stopAndTranscribeBackgroundCapture = useCallback(async () => {
+    setProcessingBackgroundAudio(true);
+    setBackgroundStatus("Stopping recording...");
+
+    try {
+      const stopResult = await stopBackgroundCapture();
+
+      if (!stopResult.uri) {
+        setBackgroundStatus("No recording found to transcribe.");
+        return;
+      }
+
+      setBackgroundStatus("Transcribing recorded audio...");
+      const transcript = await transcribeBackgroundRecording(stopResult.uri);
+      const trimmed = transcript.trim();
+
+      if (!trimmed) {
+        setBackgroundStatus("No speech detected in the background recording.");
+        return;
+      }
+
+      await appendSegment(trimmed, "background");
+      setBackgroundStatus("Background transcript added. Opening Analysis...");
+      router.push({
+        pathname: "/(tabs)/analytics",
+        params: { autorun: "1", trigger: "background" },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to process background recording.";
+      setBackgroundStatus(message);
+      Alert.alert("Background Mode Error", message);
+    } finally {
+      setProcessingBackgroundAudio(false);
+    }
+  }, [appendSegment, router, stopBackgroundCapture]);
+
+  const handleBackgroundCapturePress = useCallback(async () => {
+    if (backgroundRecording) {
+      await stopAndTranscribeBackgroundCapture();
+    }
+  }, [backgroundRecording, stopAndTranscribeBackgroundCapture]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      const wasInBackground = /inactive|background/.test(appStateRef.current);
+      appStateRef.current = nextState;
+
+      if (wasInBackground && nextState === "active" && backgroundRecording) {
+        void stopAndTranscribeBackgroundCapture();
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [backgroundRecording, stopAndTranscribeBackgroundCapture]);
 
   const content = (
     <>
@@ -257,11 +416,42 @@ export default function CoachScreen() {
         </ThemedText>
       </View>
 
+      {backgroundRecording || processingBackgroundAudio || backgroundStatus ? (
+        <View style={[styles.card, { backgroundColor: surface }]}>
+          <ThemedText style={[styles.backgroundModeTitle, { color: accent }]}>
+            Background Mode
+          </ThemedText>
+          {backgroundRecording ? (
+            <Pressable
+              style={[
+                styles.backgroundCaptureBtn,
+                styles.backgroundCaptureStopBtn,
+                processingBackgroundAudio && styles.buttonDisabled,
+              ]}
+              onPress={() => void handleBackgroundCapturePress()}
+              disabled={processingBackgroundAudio}
+            >
+              <ThemedText style={styles.backgroundCaptureBtnText}>
+                Stop Background Mode
+              </ThemedText>
+            </Pressable>
+          ) : null}
+          {backgroundStatus ? (
+            <ThemedText
+              style={[styles.backgroundCaptureStatus, { color: muted }]}
+            >
+              {backgroundStatus}
+            </ThemedText>
+          ) : null}
+        </View>
+      ) : null}
+
       <ThemedText type="subtitle" style={styles.sectionTitle}>
         What are you practicing right now?
       </ThemedText>
       <ThemedText style={[styles.sectionHint, { color: muted }]}>
-        Pick the situation so your coaching mindset matches this session.
+        Pick a situation for targeted coaching, or leave all options unselected
+        for general live coaching.
       </ThemedText>
 
       <View style={styles.optionGrid}>
@@ -424,6 +614,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 10,
     lineHeight: 18,
+  },
+  backgroundModeTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  backgroundCaptureBtn: {
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  backgroundCaptureStopBtn: {
+    backgroundColor: "#b91c1c",
+  },
+  backgroundCaptureBtnText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  backgroundCaptureStatus: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
   sectionTitle: {
     marginBottom: 6,

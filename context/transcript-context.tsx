@@ -53,7 +53,14 @@ type TranscriptContextValue = {
   ) => Promise<void>;
   startNewRecordingSession: (
     reason: TranscriptArchiveReason,
-    options?: { practiceContextId?: PracticeContextId },
+    options?: {
+      practiceContextId?: PracticeContextId;
+      pendingSegment?: {
+        text: string;
+        source: TranscriptSource;
+        practiceContextId?: PracticeContextId;
+      };
+    },
   ) => Promise<void>;
   removeArchivedSession: (sessionId: string) => Promise<void>;
   clearArchivedSessions: () => Promise<void>;
@@ -205,9 +212,31 @@ export function TranscriptProvider({
   const startNewRecordingSession = useCallback(
     async (
       reason: TranscriptArchiveReason,
-      options?: { practiceContextId?: PracticeContextId },
+      options?: {
+        practiceContextId?: PracticeContextId;
+        pendingSegment?: {
+          text: string;
+          source: TranscriptSource;
+          practiceContextId?: PracticeContextId;
+        };
+      },
     ) => {
-      const snapshot = segments;
+      const pending = options?.pendingSegment;
+      const pendingText = pending?.text.trim();
+
+      const snapshot = pendingText
+        ? [
+            ...segments,
+            {
+              id: makeId(),
+              text: pendingText,
+              source: pending.source,
+              practiceContextId: pending.practiceContextId,
+              createdAt: Date.now(),
+            },
+          ]
+        : segments;
+
       if (snapshot.length > 0) {
         const inferredPracticeContextId = [...snapshot]
           .reverse()
