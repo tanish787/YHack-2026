@@ -1,7 +1,10 @@
-import { K2_CONFIG, validateConfig } from '@/config/k2-config';
-import type { CorrectionFocusId } from '@/constants/speech-coach';
-import type { ImprovementGoalId, ProficiencyLevel } from '@/constants/user-profile';
-import { IMPROVEMENT_GOALS } from '@/constants/user-profile';
+import { K2_CONFIG, validateConfig } from "@/config/k2-config";
+import type { CorrectionFocusId, PracticeContextId } from "@/constants/speech-coach";
+import type {
+  ImprovementGoalId,
+  ProficiencyLevel,
+} from "@/constants/user-profile";
+import { IMPROVEMENT_GOALS } from "@/constants/user-profile";
 import { computeSessionSpeechMetrics } from "@/services/speech-metrics";
 
 export interface SpeechAnalysisResult {
@@ -174,12 +177,11 @@ function validateAndNormalizeAnalysis(obj: any): SpeechAnalysisResult {
     vagueLanguage,
     suggestions: Array.isArray(obj?.suggestions) ? obj.suggestions : [],
     overall_score:
-      typeof obj?.overall_score === 'number'
+      typeof obj?.overall_score === "number"
         ? Math.min(100, Math.max(0, obj.overall_score))
         : 50,
     details:
-      typeof obj?.details === 'string' ? obj.details : 'Analysis complete.',
-    vagueness_score: vs,
+      typeof obj?.details === "string" ? obj.details : "Analysis complete.",
   };
 }
 
@@ -187,13 +189,13 @@ function validateAndNormalizeAnalysis(obj: any): SpeechAnalysisResult {
  * Extract JSON from text using multiple strategies
  */
 function extractValidJSON(text: string): any | null {
-  console.log('🔍 Attempting JSON extraction...');
-  
+  console.log("🔍 Attempting JSON extraction...");
+
   // Strategy 1: Try parsing entire text as JSON
   try {
     const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === 'object' && 'overall_score' in parsed) {
-      console.log('✓ Strategy 1: Entire response is valid JSON');
+    if (parsed && typeof parsed === "object" && "overall_score" in parsed) {
+      console.log("✓ Strategy 1: Entire response is valid JSON");
       return parsed;
     }
   } catch (e) {
@@ -205,8 +207,8 @@ function extractValidJSON(text: string): any | null {
   if (codeBlockMatch && codeBlockMatch[1]) {
     try {
       const parsed = JSON.parse(codeBlockMatch[1].trim());
-      if (parsed && typeof parsed === 'object' && 'overall_score' in parsed) {
-        console.log('✓ Strategy 2: Found JSON in code block');
+      if (parsed && typeof parsed === "object" && "overall_score" in parsed) {
+        console.log("✓ Strategy 2: Found JSON in code block");
         return parsed;
       }
     } catch (e) {
@@ -229,7 +231,7 @@ function extractValidJSON(text: string): any | null {
       continue;
     }
 
-    if (char === '\\' && inString) {
+    if (char === "\\" && inString) {
       escapeNext = true;
       continue;
     }
@@ -240,30 +242,30 @@ function extractValidJSON(text: string): any | null {
     }
 
     if (!inString) {
-      if (char === '{') {
+      if (char === "{") {
         if (braceCount === 0) {
           objectStart = i;
         }
         braceCount++;
-      } else if (char === '}') {
+      } else if (char === "}") {
         braceCount--;
         if (braceCount === 0 && objectStart !== -1) {
           const candidate = text.substring(objectStart, i + 1);
           try {
             const parsed = JSON.parse(candidate);
-            if (parsed && typeof parsed === 'object') {
+            if (parsed && typeof parsed === "object") {
               jsonObjects.push(parsed);
             }
           } catch (e) {
             // This object is malformed, try to repair it
             try {
               const repaired = candidate
-                .replace(/,(\s*[}\]])/g, '$1') // trailing commas
+                .replace(/,(\s*[}\]])/g, "$1") // trailing commas
                 .replace(/([^"\\])'"([^"\\]|$)/g, '$1"$2') // single quotes
-                .replace(/:\s*undefined/g, ': null') // undefined -> null
-                .replace(/,\s*}/g, '}'); // trailing comma before }
+                .replace(/:\s*undefined/g, ": null") // undefined -> null
+                .replace(/,\s*}/g, "}"); // trailing comma before }
               const parsed = JSON.parse(repaired);
-              if (parsed && typeof parsed === 'object') {
+              if (parsed && typeof parsed === "object") {
                 jsonObjects.push(parsed);
               }
             } catch (e2) {
@@ -277,19 +279,19 @@ function extractValidJSON(text: string): any | null {
 
   // Return first valid object that has the required field
   for (const obj of jsonObjects) {
-    if ('overall_score' in obj) {
-      console.log('✓ Strategy 3: Extracted valid JSON object');
+    if ("overall_score" in obj) {
+      console.log("✓ Strategy 3: Extracted valid JSON object");
       return obj;
     }
   }
 
   // If we found any objects, return the first one (might be missing fields but we'll validate)
   if (jsonObjects.length > 0) {
-    console.log('✓ Strategy 3 (fallback): Using first extracted object');
+    console.log("✓ Strategy 3 (fallback): Using first extracted object");
     return jsonObjects[0];
   }
 
-  console.log('❌ No valid JSON found in text');
+  console.log("❌ No valid JSON found in text");
   return null;
 }
 
@@ -300,24 +302,41 @@ function getCustomizedPrompt(
   speechText: string,
   focusId: CorrectionFocusId,
   proficiencyLevel?: ProficiencyLevel,
-  improvementGoals?: ImprovementGoalId[]
+  improvementGoals?: ImprovementGoalId[],
+  age?: number,
+  practiceContext?: PracticeContextId,
 ): string {
-  const baseFormat = `{"fillers":["um (2)","like (1)"],"vagueLanguage":["kind of","sort of"],"suggestions":["Reduce filler words","Be more specific"],"overall_score":65,"vagueness_score":42,"details":"Speech has some fillers and vague language but is generally clear."}`;
-  
+  const baseFormat = `{"fillers":["um (2)","like (1)"],"vagueLanguage":["kind of","sort of"],"suggestions":["Reduce filler words","Be more specific"],"overall_score":65,"details":"Speech has some fillers and vague language but is generally clear."}`;
+
   // Build proficiency context
-  const proficiencyContext = proficiencyLevel ? 
-    `User's English Proficiency Level: ${proficiencyLevel} (${getProficiencyDescription(proficiencyLevel)})\n` : '';
-  
+  const proficiencyContext = proficiencyLevel
+    ? `User's English Proficiency Level: ${proficiencyLevel} (${getProficiencyDescription(proficiencyLevel)})\n`
+    : "";
+
   // Build goals context
-  const goalsContext = improvementGoals && improvementGoals.length > 0 ?
-    `User's Selected Improvement Goals:\n${improvementGoals.map(goalId => {
-      const goal = IMPROVEMENT_GOALS.find(g => g.id === goalId);
-      return `- ${goal?.title}: ${goal?.description}`;
-    }).join('\n')}\n` : '';
-  
+  const goalsContext =
+    improvementGoals && improvementGoals.length > 0
+      ? `User's Selected Improvement Goals:\n${improvementGoals
+          .map((goalId) => {
+            const goal = IMPROVEMENT_GOALS.find((g) => g.id === goalId);
+            return `- ${goal?.title}: ${goal?.description}`;
+          })
+          .join("\n")}\n`
+      : "";
+
+  // Build age context
+  const ageContext =
+    typeof age === "number" ? `User's Age: ${Math.round(age)}\n` : "";
+
+  const practiceContextText = practiceContext
+    ? `Current Practice Scenario: ${getPracticeContextDescription(practiceContext)}\n`
+    : "";
+
   // Context instruction
-  const contextInstruction = (proficiencyContext || goalsContext) ?
-    `\nCONTEXT:\n${proficiencyContext}${goalsContext}\nTailor your feedback considering their proficiency level and goals. Be encouraging and constructive.\n` : '';
+  const contextInstruction =
+    proficiencyContext || goalsContext || ageContext || practiceContextText
+      ? `\nCONTEXT:\n${proficiencyContext}${goalsContext}${ageContext}${practiceContextText}\nTailor your feedback considering their proficiency level, goals, age, and current practice scenario. Be encouraging and constructive.\n`
+      : "";
 
   const focusPrompts: Record<CorrectionFocusId, string> = {
     fillers: `TASK: Analyze this speech for filler words ONLY.
@@ -365,12 +384,22 @@ Text: "${speechText}"`,
  */
 function getProficiencyDescription(level: ProficiencyLevel): string {
   const descriptions: Record<ProficiencyLevel, string> = {
-    beginner: 'Learning fundamentals, building confidence',
-    intermediate: 'Conversational, with room for refinement',
-    advanced: 'Near-native proficiency with subtle details to refine',
-    native: 'Native speaker optimizing communication style',
+    beginner: "Learning fundamentals, building confidence",
+    intermediate: "Conversational, with room for refinement",
+    advanced: "Near-native proficiency with subtle details to refine",
+    native: "Native speaker optimizing communication style",
   };
-  return descriptions[level] || 'Unknown proficiency level';
+  return descriptions[level] || "Unknown proficiency level";
+}
+
+function getPracticeContextDescription(context: PracticeContextId): string {
+  const descriptions: Record<PracticeContextId, string> = {
+    presentation: "Presentation to a group or class",
+    interview: "Mock interview practice",
+    meeting: "Work meeting updates and Q&A",
+    conversation: "Everyday conversation practice",
+  };
+  return descriptions[context];
 }
 
 const getApiKey = (): string => {
@@ -391,9 +420,11 @@ const getModelName = (): string => {
  */
 export async function analyzeSpeechPatterns(
   speechText: string,
-  focusId: CorrectionFocusId = 'fillers',
+  focusId: CorrectionFocusId = "fillers",
   proficiencyLevel?: ProficiencyLevel,
-  improvementGoals?: ImprovementGoalId[]
+  improvementGoals?: ImprovementGoalId[],
+  age?: number,
+  practiceContext?: PracticeContextId,
 ): Promise<SpeechAnalysisResult> {
   if (!speechText || speechText.trim().length === 0) {
     throw new Error("Please provide some speech text to analyze");
@@ -403,24 +434,33 @@ export async function analyzeSpeechPatterns(
   const endpoint = getApiEndpoint();
   const model = getModelName();
 
-    console.log('╔════════════════════════════════════════════════════════╗');
-    console.log('║        SPEECH ANALYSIS - API CALL INITIATED          ║');
-    console.log('╚════════════════════════════════════════════════════════╝');
-    console.log(`📝 Text Length: ${speechText.length} characters`);
-    console.log(`🎯 Focus Type: ${focusId}`);
-    console.log(`👤 Proficiency Level: ${proficiencyLevel || 'not specified'}`);
-    console.log(`🎯 Improvement Goals: ${improvementGoals?.length || 0} selected`);
-    console.log(`🔗 API Endpoint: ${endpoint}`);
-    console.log(`🤖 Model: ${model}`);
-    console.log(`🔐 API Key present: ${apiKey.length > 0 ? '✓' : '✗'}`);
+  console.log("╔════════════════════════════════════════════════════════╗");
+  console.log("║        SPEECH ANALYSIS - API CALL INITIATED          ║");
+  console.log("╚════════════════════════════════════════════════════════╝");
+  console.log(`📝 Text Length: ${speechText.length} characters`);
+  console.log(`🎯 Focus Type: ${focusId}`);
+  console.log(`👤 Proficiency Level: ${proficiencyLevel || "not specified"}`);
+  console.log(
+    `🎯 Improvement Goals: ${improvementGoals?.length || 0} selected`,
+  );
+  console.log(`🔗 API Endpoint: ${endpoint}`);
+  console.log(`🤖 Model: ${model}`);
+  console.log(`🔐 API Key present: ${apiKey.length > 0 ? "✓" : "✗"}`);
 
-    const systemPrompt = `You MUST output ONLY valid JSON. No explanations, no preamble, no code blocks, no additional text. Start with { and end with }. If asked to use JSON, respond ONLY with the JSON object itself.`;
+  const systemPrompt = `You MUST output ONLY valid JSON. No explanations, no preamble, no code blocks, no additional text. Start with { and end with }. If asked to use JSON, respond ONLY with the JSON object itself.`;
 
-    const userPrompt = getCustomizedPrompt(speechText, focusId, proficiencyLevel, improvementGoals);
-    
-    if (typeof __DEV__ !== 'undefined' && __DEV__) {
-      console.log(`\n💬 User Prompt:\n${userPrompt.substring(0, 200)}...`);
-    }
+  const userPrompt = getCustomizedPrompt(
+    speechText,
+    focusId,
+    proficiencyLevel,
+    improvementGoals,
+    age,
+    practiceContext,
+  );
+
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
+    console.log(`\n💬 User Prompt:\n${userPrompt.substring(0, 200)}...`);
+  }
 
   let lastError: Error | null = null;
 
@@ -454,17 +494,17 @@ export async function analyzeSpeechPatterns(
       max_tokens: 800,
     };
 
-    console.log('\n📤 Sending request to API...');
+    console.log("\n📤 Sending request to API...");
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
     const response = await fetch(endpoint, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(requestBody),
       signal: controller.signal,
@@ -472,20 +512,22 @@ export async function analyzeSpeechPatterns(
 
     clearTimeout(timeoutId);
 
-    console.log(`📥 Response Status: ${response.status} ${response.statusText}`);
+    console.log(
+      `📥 Response Status: ${response.status} ${response.statusText}`,
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('API Error Response:', errorText);
+      console.error("API Error Response:", errorText);
       let errorMessage = `API Error: ${response.status}`;
-      
+
       try {
         const errorData = JSON.parse(errorText);
         errorMessage = `API Error ${response.status}: ${errorData.error?.message || errorData.message || errorText}`;
       } catch (e) {
         errorMessage = `API Error ${response.status}: ${errorText}`;
       }
-      
+
       throw new Error(errorMessage);
     }
 
