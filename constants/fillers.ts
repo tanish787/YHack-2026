@@ -1,0 +1,38 @@
+/**
+ * Common spoken fillers / hedges for whole-word matching (lowercased tokens).
+ * False positives (e.g. "like" as verb) are acceptable for coaching signal.
+ */
+export const FILLER_WORDS = new Set([
+  'ah',
+  'eh',
+  'er',
+  'hm',
+  'hmm',
+  'uh',
+  'uhh',
+  'uhm',
+  'um',
+  'umm',
+  'ahh',
+  'erm',
+  'like',
+  'yknow',
+  'youknow',
+  'basically',
+  'literally',
+  'actually',
+  'sorta',
+  'sortof',
+  'kinda',
+  'kindof',
+  'right',
+  'okay',
+  'ok',
+  'so',
+  'well',
+  'anyway',
+  'whatever',
+  'stuff',
+  'things',
+  'thing',
+]);
