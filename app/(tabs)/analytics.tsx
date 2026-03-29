@@ -31,15 +31,8 @@ interface AnalysisResult {
 
 export default function AnalyticsScreen() {
   const colorScheme = useColorScheme() ?? "light";
-  const {
-    fullTranscript,
-    topContentWords,
-    segments,
-    appendSegment,
-    clearTranscript,
-    ready,
-  } = useTranscript();
-  const [speechText, setSpeechText] = useState("");
+  const { fullTranscript, topContentWords, segments, clearTranscript, ready } =
+    useTranscript();
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,8 +54,12 @@ export default function AnalyticsScreen() {
       return;
     }
 
-    if (!speechText.trim()) {
-      Alert.alert("Input Required", "Please enter some speech text to analyze");
+    const transcriptToAnalyze = fullTranscript.trim();
+    if (!transcriptToAnalyze) {
+      Alert.alert(
+        "No Transcript Available",
+        "Start a listening session on the Coach tab first.",
+      );
       return;
     }
 
@@ -73,11 +70,10 @@ export default function AnalyticsScreen() {
     try {
       console.log(
         "Analytics: Starting analysis with text:",
-        speechText.substring(0, 50) + "...",
+        transcriptToAnalyze.substring(0, 50) + "...",
       );
-      const result = await analyzeSpeechPatterns(speechText);
+      const result = await analyzeSpeechPatterns(transcriptToAnalyze);
       setAnalysis(result);
-      await appendSegment(speechText.trim(), "analytics");
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error occurred";
@@ -90,21 +86,8 @@ export default function AnalyticsScreen() {
   };
 
   const handleClear = () => {
-    setSpeechText("");
     setAnalysis(null);
     setError(null);
-  };
-
-  const handleSaveToTranscriptOnly = async () => {
-    if (!speechText.trim()) {
-      Alert.alert(
-        "Input Required",
-        "Enter some text to save to the transcript.",
-      );
-      return;
-    }
-    await appendSegment(speechText.trim(), "analytics");
-    Alert.alert("Saved", "This text was added to your running transcript.");
   };
 
   const [clearingTranscript, setClearingTranscript] = useState(false);
@@ -114,7 +97,6 @@ export default function AnalyticsScreen() {
     setClearingTranscript(true);
     try {
       await clearTranscript();
-      setSpeechText("");
       setAnalysis(null);
       setError(null);
     } catch {
@@ -208,13 +190,17 @@ export default function AnalyticsScreen() {
             )}
             {fullTranscript.trim().length > 0 || segments.length > 0 ? (
               <Pressable
-                style={[styles.linkBtn, clearingTranscript && styles.linkBtnDisabled]}
+                style={[
+                  styles.linkBtn,
+                  clearingTranscript && styles.linkBtnDisabled,
+                ]}
                 onPress={() => void handleClearStoredTranscript()}
                 disabled={clearingTranscript}
                 accessibilityRole="button"
-                accessibilityLabel="Clear saved transcript and analysis">
+                accessibilityLabel="Clear saved transcript and analysis"
+              >
                 <Text style={styles.linkBtnText}>
-                  {clearingTranscript ? 'Clearing…' : 'Clear saved transcript'}
+                  {clearingTranscript ? "Clearing…" : "Clear saved transcript"}
                 </Text>
               </Pressable>
             ) : null}
@@ -224,7 +210,7 @@ export default function AnalyticsScreen() {
         {/* Input Section */}
         <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
           <Text style={[styles.label, { color: textColor }]}>
-            Paste your speech or conversation:
+            Saved speech or conversation:
           </Text>
           <TextInput
             style={[
@@ -235,15 +221,14 @@ export default function AnalyticsScreen() {
                 borderColor: colorScheme === "dark" ? "#404854" : "#e5e7eb",
               },
             ]}
-            placeholder="Enter your speech text here..."
+            placeholder="Your saved transcript will appear here..."
             placeholderTextColor={
               colorScheme === "dark" ? "#9ca3af" : "#9ca3af"
             }
             multiline
             numberOfLines={6}
-            value={speechText}
-            onChangeText={setSpeechText}
-            editable={!isLoading}
+            value={fullTranscript}
+            editable={false}
           />
         </ThemedView>
 
@@ -272,16 +257,6 @@ export default function AnalyticsScreen() {
             <Text style={[styles.buttonText, { color: "#007AFF" }]}>Clear</Text>
           </Pressable>
         </View>
-
-        <Pressable
-          style={[styles.saveTranscriptBtn, isLoading && styles.buttonDisabled]}
-          onPress={handleSaveToTranscriptOnly}
-          disabled={isLoading}
-        >
-          <Text style={[styles.saveTranscriptBtnText, { color: textColor }]}>
-            Save text to transcript (no AI)
-          </Text>
-        </Pressable>
 
         {/* Loading State */}
         {isLoading && (
@@ -380,7 +355,7 @@ export default function AnalyticsScreen() {
         )}
 
         {/* Empty State */}
-        {!analysis && !isLoading && speechText && !error && (
+        {!analysis && !isLoading && fullTranscript.trim() && !error && (
           <ThemedView style={[styles.emptyState, { backgroundColor: cardBg }]}>
             <Text style={[styles.emptyStateText, { color: textColor }]}>
               Tap {"\u201c"}Analyze Speech{"\u201d"} to get started
@@ -585,15 +560,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#ef4444",
     fontWeight: "600",
-  },
-  saveTranscriptBtn: {
-    paddingVertical: 12,
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  saveTranscriptBtnText: {
-    fontSize: 15,
-    fontWeight: "600",
-    textDecorationLine: "underline",
   },
 });

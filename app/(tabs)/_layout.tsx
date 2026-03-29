@@ -29,8 +29,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="analytics"
         options={{
-          title: 'Analytics',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="chart.bar.fill" color={color} />,
+          title: "Analytics",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={28} name="chart.bar.fill" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
@@ -45,25 +47,20 @@ export default function TabLayout() {
       <Tabs.Screen
         name="speech-to-text"
         options={{
+          href: null,
+        }}
+      />
+      {/*
+      <Tabs.Screen
+        name="speech-to-text"
+        options={{
           title: "Speech to Text",
           tabBarIcon: ({ color }) => (
             <IconSymbol size={28} name="waveform.circle.fill" color={color} />
           ),
         }}
       />
-      <Tabs.Screen
-        name="haptic-test"
-        options={{
-          title: "Haptic Test",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={28}
-              name="iphone.radiowaves.left.and.right"
-              color={color}
-            />
-          ),
-        }}
-      />
+      */}
     </Tabs>
   );
 }
