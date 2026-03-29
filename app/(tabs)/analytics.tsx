@@ -1,3 +1,4 @@
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -22,8 +23,8 @@ import { useTranscript } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
 import {
-    analyzeSpeechPatterns,
-    validateApiConfiguration,
+  analyzeSpeechPatterns,
+  validateApiConfiguration,
 } from "@/services/llm-service";
 import {
   transcribeBackgroundRecording,
@@ -44,14 +45,19 @@ export default function AnalyticsScreen() {
     fullTranscript,
     topContentWords,
     segments,
+    archivedSessions,
     appendSegment,
+    startNewRecordingSession,
+    removeArchivedSession,
+    clearArchivedSessions,
     clearTranscript,
     ready,
   } = useTranscript();
-  const { selectedFocus } = useCoachContext();
+  const router = useRouter();
+  const params = useLocalSearchParams<{ autorun?: string; trigger?: string }>();
+  const { selectedFocus, selectedPracticeContext } = useCoachContext();
   const { profile } = useProfile();
   const { recordAnalysis, recordPractice } = useProgress();
-  const [speechText, setSpeechText] = useState("");
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,11 +70,64 @@ export default function AnalyticsScreen() {
     useState(false);
   const [backgroundStatus, setBackgroundStatus] = useState<string | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const autoRunLockRef = useRef(false);
 
   const bgColor = useThemeColor({}, "background");
   const textColor = useThemeColor({}, "text");
   const muted = useThemeColor({}, "icon");
   const cardBg = colorScheme === "dark" ? "#1c2124" : "#f0f4f8";
+  const borderColor = colorScheme === "dark" ? "#334155" : "#cbd5e1";
+
+  const recentArchivedSessions = archivedSessions.slice(0, 8);
+
+  const formatArchiveTime = useCallback((timestamp: number) => {
+    try {
+      return new Date(timestamp).toLocaleString();
+    } catch {
+      return "Unknown time";
+    }
+  }, []);
+
+  const getArchiveReasonLabel = useCallback((reason: "live" | "background") => {
+    return reason === "live" ? "Live Coaching" : "Background Capture";
+  }, []);
+
+  const confirmDeleteArchivedSession = useCallback(
+    (sessionId: string) => {
+      Alert.alert(
+        "Delete archived session?",
+        "This removes the session from local history.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              void removeArchivedSession(sessionId);
+            },
+          },
+        ],
+      );
+    },
+    [removeArchivedSession],
+  );
+
+  const confirmClearAllHistory = useCallback(() => {
+    Alert.alert(
+      "Clear all session history?",
+      "All archived sessions will be removed from this device.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear all",
+          style: "destructive",
+          onPress: () => {
+            void clearArchivedSessions();
+          },
+        },
+      ],
+    );
+  }, [clearArchivedSessions]);
 
   const stopAndTranscribeBackgroundCapture = useCallback(async () => {
     setProcessingBackgroundAudio(true);
@@ -91,8 +150,9 @@ export default function AnalyticsScreen() {
         return;
       }
 
-      await appendSegment(trimmed, "listening");
+      await appendSegment(trimmed, "background");
       setBackgroundStatus("Background transcript added.");
+      await handleAnalyze(trimmed, "background");
     } catch (err) {
       const message =
         err instanceof Error
@@ -112,6 +172,7 @@ export default function AnalyticsScreen() {
     }
 
     try {
+      await startNewRecordingSession("background");
       await start();
       setBackgroundStatus("Recording in background is active.");
     } catch (err) {
@@ -122,7 +183,12 @@ export default function AnalyticsScreen() {
       setBackgroundStatus(message);
       Alert.alert("Background Capture Error", message);
     }
-  }, [backgroundRecording, start, stopAndTranscribeBackgroundCapture]);
+  }, [
+    backgroundRecording,
+    start,
+    startNewRecordingSession,
+    stopAndTranscribeBackgroundCapture,
+  ]);
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (nextState) => {
@@ -139,7 +205,10 @@ export default function AnalyticsScreen() {
     };
   }, [backgroundRecording, stopAndTranscribeBackgroundCapture]);
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = async (
+    transcriptOverride?: string,
+    runTrigger: "manual" | "live" | "background" = "manual",
+  ) => {
     // Validate configuration first
     const config = validateApiConfiguration();
     if (!config.valid) {
@@ -151,7 +220,12 @@ export default function AnalyticsScreen() {
       return;
     }
 
-    const transcriptToAnalyze = fullTranscript.trim();
+    const transcriptToAnalyze = (transcriptOverride ?? fullTranscript).trim();
+    const listeningTranscript = segments
+      .filter((s) => s.source === "listening")
+      .map((s) => s.text)
+      .join("\n\n")
+      .trim();
     if (!transcriptToAnalyze) {
       Alert.alert(
         "No Transcript Available",
@@ -171,41 +245,55 @@ export default function AnalyticsScreen() {
 
     try {
       if (__DEV__) {
-        console.log('═══════════════════════════════════════════════════════');
-        console.log('📊 ANALYTICS PAGE - INITIATING ANALYSIS');
-        console.log('═══════════════════════════════════════════════════════');
-        console.log(`📝 Input Text: ${speechText.substring(0, 100)}${speechText.length > 100 ? '...' : ''}`);
+        console.log("═══════════════════════════════════════════════════════");
+        console.log("📊 ANALYTICS PAGE - INITIATING ANALYSIS");
+        console.log("═══════════════════════════════════════════════════════");
+        console.log(
+          `📝 Input Text: ${transcriptToAnalyze.substring(0, 100)}${transcriptToAnalyze.length > 100 ? "..." : ""}`,
+        );
         console.log(`🎯 Selected Focus: ${selectedFocus}`);
         console.log(`👤 User Proficiency: ${profile.proficiencyLevel}`);
-        console.log(`🎯 Improvement Goals: ${profile.improvementGoals.join(', ')}`);
-        console.log(`📏 Text Length: ${speechText.length} characters`);
-        console.log('───────────────────────────────────────────────────────');
+        console.log(
+          `🎯 Improvement Goals: ${profile.improvementGoals.join(", ")}`,
+        );
+        console.log(`📏 Text Length: ${transcriptToAnalyze.length} characters`);
+        console.log("───────────────────────────────────────────────────────");
       }
 
       const result = await analyzeSpeechPatterns(
-        speechText,
+        transcriptToAnalyze,
         selectedFocus,
         profile.proficiencyLevel,
         profile.improvementGoals,
+        profile.age,
+        runTrigger === "live" ||
+          (runTrigger === "manual" &&
+            transcriptToAnalyze === listeningTranscript &&
+            listeningTranscript.length > 0)
+          ? selectedPracticeContext
+          : undefined,
       );
 
       if (__DEV__) {
-        console.log('───────────────────────────────────────────────────────');
-        console.log('✅ Analysis Complete - Updating UI');
-        console.log('═══════════════════════════════════════════════════════\n');
+        console.log("───────────────────────────────────────────────────────");
+        console.log("✅ Analysis Complete - Updating UI");
+        console.log(
+          "═══════════════════════════════════════════════════════\n",
+        );
       }
-      
+
       setAnalysis(result);
-      
+
       // Record progress tracking
       const fillerCount = result.fillers.length;
       recordAnalysis(fillerCount);
-      
+
       // Estimate practice time based on text length (rough approximation)
-      const estimatedMinutes = Math.max(1, Math.ceil(speechText.length / 100));
+      const estimatedMinutes = Math.max(
+        1,
+        Math.ceil(transcriptToAnalyze.length / 100),
+      );
       recordPractice(estimatedMinutes);
-      
-      await appendSegment(speechText.trim(), "analytics");
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error occurred";
@@ -216,6 +304,30 @@ export default function AnalyticsScreen() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (params.autorun !== "1") {
+      autoRunLockRef.current = false;
+      return;
+    }
+
+    if (!ready || isLoading || processingBackgroundAudio) return;
+    if (autoRunLockRef.current) return;
+
+    autoRunLockRef.current = true;
+    const trigger = params.trigger === "background" ? "background" : "live";
+
+    router.replace("/(tabs)/analytics");
+    void handleAnalyze(undefined, trigger);
+  }, [
+    handleAnalyze,
+    isLoading,
+    params.autorun,
+    params.trigger,
+    processingBackgroundAudio,
+    ready,
+    router,
+  ]);
 
   const handleClear = () => {
     setAnalysis(null);
@@ -339,6 +451,120 @@ export default function AnalyticsScreen() {
           </ThemedView>
         )}
 
+        {ready && (
+          <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
+            <View style={styles.historySectionHeader}>
+              <Text style={[styles.label, { color: textColor }]}>
+                Session history
+              </Text>
+              {recentArchivedSessions.length > 0 ? (
+                <Pressable
+                  onPress={confirmClearAllHistory}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear all session history"
+                >
+                  <Text style={styles.historyClearAllText}>Clear all</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <Text style={[styles.transcriptMeta, { color: muted }]}>
+              Previous transcripts are archived locally when a new recording
+              starts.
+            </Text>
+
+            {recentArchivedSessions.length === 0 ? (
+              <Text style={[styles.emptyTranscript, { color: muted }]}>
+                No archived sessions yet.
+              </Text>
+            ) : (
+              <ScrollView
+                style={styles.historyScroll}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+              >
+                <View style={styles.historyList}>
+                  {recentArchivedSessions.map((session) => {
+                    const preview = session.transcript
+                      .replace(/\s+/g, " ")
+                      .trim();
+                    const trigger =
+                      session.reason === "live" ? "live" : "background";
+
+                    return (
+                      <View
+                        key={session.id}
+                        style={[
+                          styles.historyCard,
+                          {
+                            borderColor,
+                            backgroundColor:
+                              colorScheme === "dark" ? "#111827" : "#ffffff",
+                          },
+                        ]}
+                      >
+                        <View style={styles.historyHeader}>
+                          <Text
+                            style={[styles.historyReason, { color: textColor }]}
+                          >
+                            {getArchiveReasonLabel(session.reason)}
+                          </Text>
+                          <Text style={[styles.historyTime, { color: muted }]}>
+                            {formatArchiveTime(session.archivedAt)}
+                          </Text>
+                        </View>
+
+                        <Text style={[styles.historyMeta, { color: muted }]}>
+                          {session.segments.length} segment
+                          {session.segments.length === 1 ? "" : "s"}
+                        </Text>
+
+                        <Text
+                          style={[styles.historyPreview, { color: textColor }]}
+                        >
+                          {preview.length > 180
+                            ? `${preview.slice(0, 180)}…`
+                            : preview}
+                        </Text>
+
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.historyAnalyzeBtn,
+                            { opacity: pressed ? 0.85 : 1 },
+                          ]}
+                          onPress={() =>
+                            void handleAnalyze(session.transcript, trigger)
+                          }
+                          disabled={isLoading || processingBackgroundAudio}
+                        >
+                          <Text style={styles.historyAnalyzeBtnText}>
+                            Analyze this session
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.historyDeleteBtn,
+                            { opacity: pressed ? 0.75 : 1 },
+                          ]}
+                          onPress={() =>
+                            confirmDeleteArchivedSession(session.id)
+                          }
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete archived session"
+                        >
+                          <Text style={styles.historyDeleteBtnText}>
+                            Delete
+                          </Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            )}
+          </ThemedView>
+        )}
+
         {/* Input Section */}
         <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
           <Text style={[styles.label, { color: textColor }]}>
@@ -396,7 +622,7 @@ export default function AnalyticsScreen() {
               styles.analyzeButton,
               (isLoading || processingBackgroundAudio) && styles.buttonDisabled,
             ]}
-            onPress={handleAnalyze}
+            onPress={() => void handleAnalyze()}
             disabled={isLoading || processingBackgroundAudio}
           >
             {isLoading ? (
@@ -727,6 +953,77 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: 13,
     fontWeight: "600",
+  },
+  historyList: {
+    gap: 12,
+  },
+  historyScroll: {
+    maxHeight: 320,
+  },
+  historySectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  historyClearAllText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#ef4444",
+  },
+  historyCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+  },
+  historyHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  historyReason: {
+    fontSize: 14,
+    fontWeight: "700",
+    flex: 1,
+  },
+  historyTime: {
+    fontSize: 12,
+  },
+  historyMeta: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  historyPreview: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  historyAnalyzeBtn: {
+    alignSelf: "flex-start",
+    marginTop: 2,
+    borderRadius: 8,
+    backgroundColor: "#0ea5e9",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  historyAnalyzeBtnText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  historyDeleteBtn: {
+    alignSelf: "flex-start",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ef4444",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  historyDeleteBtnText: {
+    color: "#ef4444",
+    fontSize: 13,
+    fontWeight: "700",
   },
   linkBtn: {
     marginTop: 14,
