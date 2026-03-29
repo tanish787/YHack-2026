@@ -1,3 +1,4 @@
+import { Link } from "expo-router";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, {
   useCallback,
@@ -22,6 +23,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { getCorrectionFocusTitle } from "@/constants/speech-coach";
 import { PRACTICE_CONTEXT_OPTIONS } from "@/constants/speech-coach";
 import { useCoachContext } from "@/context/coach-context";
 import { useProfile } from "@/context/profile-context";
@@ -32,10 +34,12 @@ import {
 } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
+import { saveSpeechAnalysisHistory } from "@/services/firebase";
 import {
   analyzeSpeechPatterns,
   validateApiConfiguration,
 } from "@/services/llm-service";
+import { buildSpeechHistoryPayload } from "@/services/speech-history-payload";
 import {
   transcribeBackgroundRecording,
   useBackgroundCaptureRecorder,
@@ -47,6 +51,7 @@ interface AnalysisResult {
   suggestions: string[];
   overall_score: number;
   details: string;
+  vagueness_score: number;
 }
 
 export default function AnalyticsScreen() {
@@ -273,19 +278,21 @@ export default function AnalyticsScreen() {
 
     try {
       if (__DEV__) {
-        console.log("═══════════════════════════════════════════════════════");
-        console.log("📊 ANALYTICS PAGE - INITIATING ANALYSIS");
-        console.log("═══════════════════════════════════════════════════════");
+        console.log('═══════════════════════════════════════════════════════');
+        console.log('📊 ANALYTICS PAGE - INITIATING ANALYSIS');
+        console.log('═══════════════════════════════════════════════════════');
         console.log(
-          `📝 Input Text: ${transcriptToAnalyze.substring(0, 100)}${transcriptToAnalyze.length > 100 ? "..." : ""}`,
+          `📝 Input Text: ${transcriptToAnalyze.substring(0, 100)}${transcriptToAnalyze.length > 100 ? '...' : ''}`,
         );
         console.log(`🎯 Selected Focus: ${selectedFocus}`);
         console.log(`👤 User Proficiency: ${profile.proficiencyLevel}`);
         console.log(
-          `🎯 Improvement Goals: ${profile.improvementGoals.join(", ")}`,
+          `🎯 Improvement Goals: ${profile.improvementGoals.join(', ')}`,
         );
-        console.log(`📏 Text Length: ${transcriptToAnalyze.length} characters`);
-        console.log("───────────────────────────────────────────────────────");
+        console.log(
+          `📏 Text Length: ${transcriptToAnalyze.length} characters`,
+        );
+        console.log('───────────────────────────────────────────────────────');
       }
 
       const result = await analyzeSpeechPatterns(
@@ -312,16 +319,25 @@ export default function AnalyticsScreen() {
 
       setAnalysis(result);
 
-      // Record progress tracking
       const fillerCount = result.fillers.length;
       recordAnalysis(fillerCount);
 
-      // Estimate practice time based on text length (rough approximation)
       const estimatedMinutes = Math.max(
         1,
         Math.ceil(transcriptToAnalyze.length / 100),
       );
       recordPractice(estimatedMinutes);
+
+      void saveSpeechAnalysisHistory(
+        buildSpeechHistoryPayload(
+          transcriptToAnalyze,
+          segments,
+          selectedFocus,
+          result,
+        ),
+      ).catch((syncErr) => {
+        console.warn("Firebase history sync failed:", syncErr);
+      });
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error occurred";
@@ -413,6 +429,27 @@ export default function AnalyticsScreen() {
             Get AI-powered feedback on your speech patterns
           </ThemedText>
         </View>
+
+        <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
+          <Text style={[styles.label, { color: textColor }]}>
+            Session history
+          </Text>
+          <Text style={[styles.transcriptMeta, { color: muted }]}>
+            Each analysis saves scores and metrics to Firebase (not your raw
+            transcript). View trends on the History tab.
+          </Text>
+          <Link href="/history" asChild>
+            <Pressable
+              style={styles.historyLinkBtn}
+              accessibilityRole="link"
+              accessibilityLabel="Open session history"
+            >
+              <Text style={[styles.historyLinkText, { color: "#007AFF" }]}>
+                Open History →
+              </Text>
+            </Pressable>
+          </Link>
+        </ThemedView>
 
         {ready && (
           <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
@@ -707,6 +744,12 @@ export default function AnalyticsScreen() {
               <Text style={[styles.summaryText, { color: textColor }]}>
                 {analysis.details}
               </Text>
+              <Text
+                style={[styles.summaryMeta, { color: muted, marginTop: 10 }]}
+              >
+                Vagueness index (model): {analysis.vagueness_score}/100 · Focus:{" "}
+                {getCorrectionFocusTitle(selectedFocus)}
+              </Text>
             </View>
 
             {/* Filler Words */}
@@ -917,6 +960,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  summaryMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
   resultsContainer: {
     padding: 16,
     borderRadius: 12,
@@ -1065,6 +1112,15 @@ const styles = StyleSheet.create({
   linkBtnText: {
     fontSize: 14,
     color: "#ef4444",
+    fontWeight: "600",
+  },
+  historyLinkBtn: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    paddingVertical: 8,
+  },
+  historyLinkText: {
+    fontSize: 15,
     fontWeight: "600",
   },
 });

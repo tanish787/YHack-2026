@@ -63,3 +63,7 @@ export const PRACTICE_CONTEXT_OPTIONS: PracticeContext[] = [
     subtitle: "Natural flow and clear communication",
   },
 ];
+
+export function getCorrectionFocusTitle(id: CorrectionFocusId): string {
+  return CORRECTION_FOCUS_OPTIONS.find((o) => o.id === id)?.title ?? id;
+}

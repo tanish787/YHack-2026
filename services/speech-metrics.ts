@@ -241,6 +241,36 @@ export function fillerRatePercent(text: string): number {
 }
 
 /**
+ * Share of consecutive word pairs that repeat an earlier pair (0–100).
+ * Higher = more repeated phrasing in the sample.
+ */
+export function repetitionBurdenPercent(text: string): number {
+  const re = /[a-zA-Z0-9']+/g;
+  const words: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    words.push(normalizeWordToken(m[0]));
+  }
+  if (words.length < 2) return 0;
+  const seen = new Set<string>();
+  let repeatedPairSlots = 0;
+  for (let i = 0; i < words.length - 1; i++) {
+    const key = `${words[i]}|${words[i + 1]}`;
+    if (seen.has(key)) {
+      repeatedPairSlots += 1;
+    }
+    seen.add(key);
+  }
+  return (repeatedPairSlots / (words.length - 1)) * 100;
+}
+
+export function countWordTokens(text: string): number {
+  const re = /[a-zA-Z0-9']+/g;
+  const m = text.trim().match(re);
+  return m?.length ?? 0;
+}
+
+/**
  * Pace proxy: lower coefficient of variation of sentence lengths → higher score.
  * Single-sentence samples return a neutral mid score.
  */

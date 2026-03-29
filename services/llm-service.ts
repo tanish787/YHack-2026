@@ -7,12 +7,14 @@ import type {
 import { IMPROVEMENT_GOALS } from "@/constants/user-profile";
 import { computeSessionSpeechMetrics } from "@/services/speech-metrics";
 
-interface SpeechAnalysisResult {
+export interface SpeechAnalysisResult {
   fillers: string[];
   vagueLanguage: string[];
   suggestions: string[];
   overall_score: number;
   details: string;
+  /** 0–100 from the model; higher = more vague / hedged overall. */
+  vagueness_score: number;
 }
 
 const REQUEST_TIMEOUT_MS = 45000;
@@ -139,12 +141,25 @@ function coerceAnalysisResult(raw: unknown): SpeechAnalysisResult {
     throw new Error("LLM response missing details");
   }
 
+  const vsRaw = (data as { vagueness_score?: unknown }).vagueness_score;
+  let vaguenessScore =
+    typeof vsRaw === "number"
+      ? vsRaw
+      : typeof vsRaw === "string"
+        ? Number(vsRaw)
+        : NaN;
+  if (!Number.isFinite(vaguenessScore)) {
+    vaguenessScore = Math.min(100, vagueLanguage.length * 14);
+  }
+  vaguenessScore = Math.round(Math.max(0, Math.min(100, vaguenessScore)));
+
   return {
     fillers,
     vagueLanguage,
     suggestions,
     overall_score: Math.max(0, Math.min(100, Math.round(scoreNum))),
     details,
+    vagueness_score: vaguenessScore,
   };
 }
 
@@ -152,10 +167,14 @@ function coerceAnalysisResult(raw: unknown): SpeechAnalysisResult {
  * Safely extract and validate fields from a parsed JSON object
  */
 function validateAndNormalizeAnalysis(obj: any): SpeechAnalysisResult {
-  // Ensure all required fields exist with correct types
+  const vagueLanguage = Array.isArray(obj?.vagueLanguage) ? obj.vagueLanguage : [];
+  const vs =
+    typeof obj?.vagueness_score === 'number'
+      ? Math.round(Math.min(100, Math.max(0, obj.vagueness_score)))
+      : Math.min(100, vagueLanguage.length * 14);
   return {
     fillers: Array.isArray(obj?.fillers) ? obj.fillers : [],
-    vagueLanguage: Array.isArray(obj?.vagueLanguage) ? obj.vagueLanguage : [],
+    vagueLanguage,
     suggestions: Array.isArray(obj?.suggestions) ? obj.suggestions : [],
     overall_score:
       typeof obj?.overall_score === "number"
@@ -321,7 +340,7 @@ function getCustomizedPrompt(
 
   const focusPrompts: Record<CorrectionFocusId, string> = {
     fillers: `TASK: Analyze this speech for filler words ONLY.
-REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, details
+REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
 CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blocks. Start with { and end with }
 
 Example format:
@@ -330,7 +349,7 @@ ${contextInstruction}
 Text: "${speechText}"`,
 
     pacing: `TASK: Analyze this speech for pacing and wordiness ONLY.
-REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, details
+REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
 CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blocks. Start with { and end with }
 
 Example format:
@@ -339,7 +358,7 @@ ${contextInstruction}
 Text: "${speechText}"`,
 
     hedging: `TASK: Analyze this speech for hedging and vague language ONLY.
-REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, details
+REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
 CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blocks. Start with { and end with }
 
 Example format:
@@ -348,7 +367,7 @@ ${contextInstruction}
 Text: "${speechText}"`,
 
     repetition: `TASK: Analyze this speech for repetition and redundancy ONLY.
-REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, details
+REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
 CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blocks. Start with { and end with }
 
 Example format:
