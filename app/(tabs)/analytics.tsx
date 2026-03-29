@@ -1,3 +1,4 @@
+import { Link } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,16 +16,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { getCorrectionFocusTitle } from "@/constants/speech-coach";
 import { useCoachContext } from "@/context/coach-context";
 import { useProfile } from "@/context/profile-context";
 import { useProgress } from "@/context/progress-context";
 import { useTranscript } from "@/context/transcript-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useThemeColor } from "@/hooks/use-theme-color";
+import { saveSpeechAnalysisHistory } from "@/services/firebase";
 import {
-    analyzeSpeechPatterns,
-    validateApiConfiguration,
+  analyzeSpeechPatterns,
+  validateApiConfiguration,
 } from "@/services/llm-service";
+import { buildSpeechHistoryPayload } from "@/services/speech-history-payload";
 import {
   transcribeBackgroundRecording,
   useBackgroundCaptureRecorder,
@@ -36,6 +40,7 @@ interface AnalysisResult {
   suggestions: string[];
   overall_score: number;
   details: string;
+  vagueness_score: number;
 }
 
 export default function AnalyticsScreen() {
@@ -51,7 +56,6 @@ export default function AnalyticsScreen() {
   const { selectedFocus } = useCoachContext();
   const { profile } = useProfile();
   const { recordAnalysis, recordPractice } = useProgress();
-  const [speechText, setSpeechText] = useState("");
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +68,6 @@ export default function AnalyticsScreen() {
     useState(false);
   const [backgroundStatus, setBackgroundStatus] = useState<string | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
-
   const bgColor = useThemeColor({}, "background");
   const textColor = useThemeColor({}, "text");
   const muted = useThemeColor({}, "icon");
@@ -174,16 +177,22 @@ export default function AnalyticsScreen() {
         console.log('═══════════════════════════════════════════════════════');
         console.log('📊 ANALYTICS PAGE - INITIATING ANALYSIS');
         console.log('═══════════════════════════════════════════════════════');
-        console.log(`📝 Input Text: ${speechText.substring(0, 100)}${speechText.length > 100 ? '...' : ''}`);
+        console.log(
+          `📝 Input Text: ${transcriptToAnalyze.substring(0, 100)}${transcriptToAnalyze.length > 100 ? '...' : ''}`,
+        );
         console.log(`🎯 Selected Focus: ${selectedFocus}`);
         console.log(`👤 User Proficiency: ${profile.proficiencyLevel}`);
-        console.log(`🎯 Improvement Goals: ${profile.improvementGoals.join(', ')}`);
-        console.log(`📏 Text Length: ${speechText.length} characters`);
+        console.log(
+          `🎯 Improvement Goals: ${profile.improvementGoals.join(', ')}`,
+        );
+        console.log(
+          `📏 Text Length: ${transcriptToAnalyze.length} characters`,
+        );
         console.log('───────────────────────────────────────────────────────');
       }
 
       const result = await analyzeSpeechPatterns(
-        speechText,
+        transcriptToAnalyze,
         selectedFocus,
         profile.proficiencyLevel,
         profile.improvementGoals,
@@ -194,18 +203,28 @@ export default function AnalyticsScreen() {
         console.log('✅ Analysis Complete - Updating UI');
         console.log('═══════════════════════════════════════════════════════\n');
       }
-      
+
       setAnalysis(result);
-      
-      // Record progress tracking
+
       const fillerCount = result.fillers.length;
       recordAnalysis(fillerCount);
-      
-      // Estimate practice time based on text length (rough approximation)
-      const estimatedMinutes = Math.max(1, Math.ceil(speechText.length / 100));
+
+      const estimatedMinutes = Math.max(
+        1,
+        Math.ceil(transcriptToAnalyze.length / 100),
+      );
       recordPractice(estimatedMinutes);
-      
-      await appendSegment(speechText.trim(), "analytics");
+
+      void saveSpeechAnalysisHistory(
+        buildSpeechHistoryPayload(
+          transcriptToAnalyze,
+          segments,
+          selectedFocus,
+          result,
+        ),
+      ).catch((syncErr) => {
+        console.warn("Firebase history sync failed:", syncErr);
+      });
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error occurred";
@@ -273,6 +292,27 @@ export default function AnalyticsScreen() {
             Get AI-powered feedback on your speech patterns
           </ThemedText>
         </View>
+
+        <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
+          <Text style={[styles.label, { color: textColor }]}>
+            Session history
+          </Text>
+          <Text style={[styles.transcriptMeta, { color: muted }]}>
+            Each analysis saves scores and metrics to Firebase (not your raw
+            transcript). View trends on the History tab.
+          </Text>
+          <Link href="/history" asChild>
+            <Pressable
+              style={styles.historyLinkBtn}
+              accessibilityRole="link"
+              accessibilityLabel="Open session history"
+            >
+              <Text style={[styles.historyLinkText, { color: "#007AFF" }]}>
+                Open History →
+              </Text>
+            </Pressable>
+          </Link>
+        </ThemedView>
 
         {ready && (
           <ThemedView style={[styles.section, { backgroundColor: cardBg }]}>
@@ -452,6 +492,12 @@ export default function AnalyticsScreen() {
               </Text>
               <Text style={[styles.summaryText, { color: textColor }]}>
                 {analysis.details}
+              </Text>
+              <Text
+                style={[styles.summaryMeta, { color: muted, marginTop: 10 }]}
+              >
+                Vagueness index (model): {analysis.vagueness_score}/100 · Focus:{" "}
+                {getCorrectionFocusTitle(selectedFocus)}
               </Text>
             </View>
 
@@ -663,6 +709,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  summaryMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
   resultsContainer: {
     padding: 16,
     borderRadius: 12,
@@ -740,6 +790,15 @@ const styles = StyleSheet.create({
   linkBtnText: {
     fontSize: 14,
     color: "#ef4444",
+    fontWeight: "600",
+  },
+  historyLinkBtn: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    paddingVertical: 8,
+  },
+  historyLinkText: {
+    fontSize: 15,
     fontWeight: "600",
   },
 });

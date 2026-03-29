@@ -28,3 +28,7 @@ export const CORRECTION_FOCUS_OPTIONS: CorrectionFocus[] = [
     subtitle: 'Saying the same idea twice',
   },
 ];
+
+export function getCorrectionFocusTitle(id: CorrectionFocusId): string {
+  return CORRECTION_FOCUS_OPTIONS.find((o) => o.id === id)?.title ?? id;
+}
