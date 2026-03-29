@@ -21,7 +21,23 @@ export interface SpeechAnalysisResult {
 }
 
 const REQUEST_TIMEOUT_MS = 45000;
+/** Speech analysis can send long transcripts; allow a longer wait than generic API calls. */
+const ANALYSIS_REQUEST_TIMEOUT_MS = 120_000;
+/** Keeps prompt size within model limits; older text is dropped from the start. */
+const ANALYSIS_MAX_INPUT_CHARS = 18_000;
+const ANALYSIS_MAX_OUTPUT_TOKENS = 1_400;
 const MAX_RETRIES = 2;
+
+function clipTranscriptForAnalysis(text: string): string {
+  const t = text.trim();
+  if (t.length <= ANALYSIS_MAX_INPUT_CHARS) {
+    return t;
+  }
+  return (
+    "[Earlier portion omitted for length; feedback focuses on the most recent segment.]\n\n" +
+    t.slice(-ANALYSIS_MAX_INPUT_CHARS)
+  );
+}
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
@@ -32,7 +48,7 @@ function computeDeterministicQualityScore(text: string): number {
   const wordCount = metrics.vocabulary.totalWords;
 
   // Fillers: strong negative signal, capped to avoid over-penalizing long sessions.
-  const fillerPenalty = clamp(metrics.fillerRatePercent * 4, 0, 45);
+  const fillerPenalty = clamp(metrics.fillerRatePercent * 5, 0, 58);
   const fillerScore = 100 - fillerPenalty;
 
   // Vocabulary diversity: map practical range [0.2, 0.55] to [0, 100].
@@ -52,18 +68,26 @@ function computeDeterministicQualityScore(text: string): number {
     vocabScore * 0.15 +
     cleanStreakScore * 0.15;
 
-  // Short samples are noisy: blend toward neutral score.
-  const confidence = clamp((wordCount - 20) / 80, 0, 1);
-  const neutral = 60;
+  // Short samples are noisy: blend toward a neutral that does not pull everything to the mid-50s.
+  const confidence = clamp((wordCount - 10) / 55, 0, 1);
+  const neutral = 50;
   return Math.round(raw * confidence + neutral * (1 - confidence));
+}
+
+/** Spread scores away from the common 55–70 cluster toward ~20–95 for bad vs excellent. */
+function widenSpeechQualityScore(blended: number): number {
+  const center = 56;
+  const spread = 1.55;
+  const stretched = center + (blended - center) * spread;
+  return Math.round(clamp(stretched, 0, 100));
 }
 
 function stabilizeOverallScore(llmScore: number, text: string): number {
   const deterministicScore = computeDeterministicQualityScore(text);
 
-  // Anchor LLM score to deterministic metrics to reduce run-to-run variance.
-  const blended = deterministicScore * 0.7 + llmScore * 0.3;
-  return Math.round(clamp(blended, 0, 100));
+  // Balance model judgment with metrics; widen final range so scores are not stuck mid-band.
+  const blended = deterministicScore * 0.45 + llmScore * 0.55;
+  return widenSpeechQualityScore(blended);
 }
 
 function delay(ms: number): Promise<void> {
@@ -313,7 +337,7 @@ function getCustomizedPrompt(
   practiceContext?: PracticeContextId,
   customPracticeContextText?: string,
 ): string {
-  const baseFormat = `{"fillers":["um (2)","like (1)"],"vagueLanguage":["kind of","sort of"],"suggestions":["Reduce filler words","Be more specific"],"overall_score":65,"details":"Speech has some fillers and vague language but is generally clear."}`;
+  const baseFormat = `{"fillers":["um (2)","like (1)"],"vagueLanguage":["kind of","sort of"],"suggestions":["Reduce filler words","Be more specific"],"overall_score":44,"details":"Speech has some fillers and vague language but is generally clear."}`;
 
   // Build proficiency context
   const proficiencyContext = proficiencyLevel
@@ -353,6 +377,15 @@ function getCustomizedPrompt(
       ? `\nCONTEXT:\n${proficiencyContext}${goalsContext}${ageContext}${practiceContextText}${customPracticeContext}\nTailor your feedback considering their proficiency level, goals, age, and current practice scenario. Be encouraging and constructive.\n`
       : "";
 
+  const overallScoreGuidance = `
+overall_score (integer 0-100): use the FULL scale — do NOT cluster around 55-70.
+- ~18-32: very poor (constant fillers, chaotic, very hard to follow)
+- ~35-48: weak / clearly below average
+- ~50-62: mixed / acceptable
+- ~65-82: strong, clear, mostly polished
+- ~88-96: excellent, fluent, minimal real issues
+Pick a value that matches severity; mediocre and bad speeches must score much lower than strong ones.`;
+
   const focusPrompts: Record<CorrectionFocusId, string> = {
     fillers: `TASK: Analyze this speech for filler words ONLY.
 REQUIRED: Output valid JSON with these exact fields: fillers, vagueLanguage, suggestions, overall_score, vagueness_score, details
@@ -361,6 +394,7 @@ CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blo
 Example format:
 ${baseFormat}
 ${contextInstruction}
+${overallScoreGuidance}
 Text: "${speechText}"`,
 
     pacing: `TASK: Analyze this speech for pacing and wordiness ONLY.
@@ -370,6 +404,7 @@ CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blo
 Example format:
 ${baseFormat}
 ${contextInstruction}
+${overallScoreGuidance}
 Text: "${speechText}"`,
 
     hedging: `TASK: Analyze this speech for hedging and vague language ONLY.
@@ -379,6 +414,7 @@ CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blo
 Example format:
 ${baseFormat}
 ${contextInstruction}
+${overallScoreGuidance}
 Text: "${speechText}"`,
 
     repetition: `TASK: Analyze this speech for repetition and redundancy ONLY.
@@ -388,6 +424,7 @@ CRITICAL: Output ONLY the JSON object. No explanations, no preamble, no code blo
 Example format:
 ${baseFormat}
 ${contextInstruction}
+${overallScoreGuidance}
 Text: "${speechText}"`,
   };
 
@@ -446,6 +483,8 @@ export async function analyzeSpeechPatterns(
     throw new Error("Please provide some speech text to analyze");
   }
 
+  const clippedText = clipTranscriptForAnalysis(speechText);
+
   const apiKey = getApiKey();
   const endpoint = getApiEndpoint();
   const model = getModelName();
@@ -453,7 +492,9 @@ export async function analyzeSpeechPatterns(
   console.log("╔════════════════════════════════════════════════════════╗");
   console.log("║        SPEECH ANALYSIS - API CALL INITIATED          ║");
   console.log("╚════════════════════════════════════════════════════════╝");
-  console.log(`📝 Text Length: ${speechText.length} characters`);
+  console.log(
+    `📝 Text Length: ${speechText.length} characters (analyzing ${clippedText.length} after clip)`,
+  );
   console.log(`🎯 Focus Type: ${focusId}`);
   console.log(`👤 Proficiency Level: ${proficiencyLevel || "not specified"}`);
   console.log(
@@ -463,10 +504,12 @@ export async function analyzeSpeechPatterns(
   console.log(`🤖 Model: ${model}`);
   console.log(`🔐 API Key present: ${apiKey.length > 0 ? "✓" : "✗"}`);
 
-  const systemPrompt = `You MUST output ONLY valid JSON. No explanations, no preamble, no code blocks, no additional text. Start with { and end with }. If asked to use JSON, respond ONLY with the JSON object itself.`;
+  const systemPrompt = `You MUST output ONLY valid JSON. No explanations, no preamble, no code blocks, no additional text. Start with { and end with }. If asked to use JSON, respond ONLY with the JSON object itself.
+
+For overall_score: use the full 0-100 range. Reserve the ~20s for genuinely weak, disorganized speech and the ~90s for genuinely strong, polished speech — avoid defaulting to the 50s and 60s.`;
 
   const userPrompt = getCustomizedPrompt(
-    speechText,
+    clippedText,
     focusId,
     proficiencyLevel,
     improvementGoals,
@@ -508,45 +551,16 @@ export async function analyzeSpeechPatterns(
       ],
       stream: false,
       temperature: 0,
-      max_tokens: 800,
+      max_tokens: ANALYSIS_MAX_OUTPUT_TOKENS,
     };
 
     console.log("\n📤 Sending request to API...");
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    console.log(
-      `📥 Response Status: ${response.status} ${response.statusText}`,
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      ANALYSIS_REQUEST_TIMEOUT_MS,
     );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("API Error Response:", errorText);
-      let errorMessage = `API Error: ${response.status}`;
-
-      try {
-        const errorData = JSON.parse(errorText);
-        errorMessage = `API Error ${response.status}: ${errorData.error?.message || errorData.message || errorText}`;
-      } catch (e) {
-        errorMessage = `API Error ${response.status}: ${errorText}`;
-      }
-
-      throw new Error(errorMessage);
-    }
 
     try {
       const response = await fetch(endpoint, {
@@ -652,7 +666,7 @@ export async function analyzeSpeechPatterns(
           ...analysis,
           overall_score: stabilizeOverallScore(
             analysis.overall_score,
-            speechText,
+            clippedText,
           ),
         };
       } catch (parseError) {
@@ -669,7 +683,7 @@ export async function analyzeSpeechPatterns(
       clearTimeout(timeoutId);
       if (error instanceof Error && error.name === "AbortError") {
         lastError = new Error(
-          "Request timeout - the API server took too long to respond",
+          `Request timed out after ${Math.round(ANALYSIS_REQUEST_TIMEOUT_MS / 1000)}s. Try a shorter session or check your network.`,
         );
       } else {
         lastError =
